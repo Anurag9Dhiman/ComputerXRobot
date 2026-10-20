@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ComputerXRobot artifacts
+data/
+checkpoints/
+outputs/

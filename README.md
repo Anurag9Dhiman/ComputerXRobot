@@ -26,7 +26,8 @@ and the task result are shown together. Regenerate with
 | Scripted expert for every task (type, search, open result, open app) | ✅ 100% success, no wrong keys / clicks / collisions |
 | Data collection → behaviour cloning → evaluation on unseen tasks | ✅ baseline (see [Results](#results)) |
 | Vision-only policy (CNN encoder on camera + screen images) | 🧪 pipeline runs (`--images`); not tuned |
-| RL (PPO/SAC) | ⏳ env has the reward signal; no RL trainer yet |
+| Gymnasium API: registered envs, state/pixel observations, seeding, vector envs, render modes | ✅ `environment/gym_env.py` |
+| RL (PPO/SAC) | ⏳ Gymnasium env and shaped reward are ready; no RL trainer yet |
 
 ## Setup
 
@@ -74,11 +75,39 @@ python main.py train --data data/demos.npz --out checkpoints/bc.pt  # ~10 s on C
 python main.py evaluate --policy bc --checkpoint checkpoints/bc.pt --split both --episodes 10
 python main.py demo --policy bc --checkpoint checkpoints/bc.pt --task search --display
 
-python -m pytest -q                                              # 22 tests, ~3 s
+python -m pytest -q                                              # 31 tests, ~6 s
 ```
 
 Tasks (`--task`): `type_key`, `type_text`, `search`, `open_result`, `open_app`. `--text` is
 the character/string/query/app name; without it the first test-split item is used.
+
+## Gymnasium API
+
+```python
+import gymnasium as gym
+import environment.gym_env  # registers the ComputerXRobot/* environments
+
+env = gym.make("ComputerXRobot/Search-v0", obs_mode="pixels")   # or "state" / "both"
+obs, info = env.reset(seed=0)            # obs: {"robot_cam": 64x64x3, "screen": 64x96x3}
+action = env.action_space.sample()       # or env.unwrapped.expert_action()
+obs, reward, terminated, truncated, info = env.step(action)
+info["ui_state"]                         # ground truth: editor text, cursor, page, query, ...
+```
+
+| | |
+|---|---|
+| IDs | `ComputerXRobot/ComputerUse-v0` (all tasks), `TypeKey-v0`, `TypeText-v0`, `Search-v0`, `OpenResult-v0`, `OpenApp-v0` |
+| Action | `Box(-1, 1, (4,))`: tool-target change `dx, dy, dz` (×6 mm per step) and finger (-1 retracted … 1 fully extended) |
+| Observation | `obs_mode="state"`: `Box(66,)` features; `"pixels"`: dict of uint8 images (`cameras`, default `robot_cam`, plus `screen`; sizes via `image_size`, `screen_size`); `"both"`: pixels plus `"state"` |
+| Episodes | each `reset` samples a task from `tasks`/`split` with the env's RNG, or pass `options={"task": "search", "text": "..."}`. `terminated` = task succeeded, `truncated` = task time limit |
+| Reward | progress gained, +1 on success, −0.1 per wrong key or failed click (a solved episode returns 2.0) |
+| `info` | `task`, `text`, `instruction`, `is_success`, `progress`, `expected` (next char / widget), `ui_state`, `events`; `metrics` at episode end |
+| Render | `render_mode="rgb_array"` returns the 1280×720 dashboard (works with `gymnasium.wrappers.RecordVideo`, which needs `pip install "gymnasium[other]"`); `"human"` opens a window |
+| Speed (this Mac) | ~1,500 steps/s in `state` mode; ~290 steps/s with 64×64 pixels; `gym.vector.AsyncVectorEnv` with 4 envs ~420 steps/s |
+
+The env passes `gymnasium.utils.env_checker.check_env` in all three observation modes. The
+scene itself is not randomised yet: layout, lighting and cameras are fixed, and only the
+task and its text vary between episodes.
 
 ## How it works
 
@@ -186,7 +215,8 @@ environment/
   screen.py            desktop -> monitor texture, keycap labels, offscreen renderer
   ui_events.py         physical interaction -> UI events
   task_manager.py      tasks, splits, success checks, reward, event bookkeeping
-  computer_env.py      gym-style environment tying everything together
+  computer_env.py      core simulation environment tying everything together
+  gym_env.py           Gymnasium wrapper + registered ComputerXRobot/* env IDs
 control/
   robot_controller.py  damped-least-squares IK and actuator targets
   contact_detection.py key/button press detection, contact classification
@@ -198,7 +228,7 @@ evaluation/
   task_success.py      episode runner, task suites
   metrics.py           success rate, time, wrong keys, failed clicks, collisions
   dashboard.py         combined 3D / camera / screen / result view
-tests/                 milestone 1, UI mapping, desktop/tasks, end-to-end pipeline, demo outputs
+tests/                 milestone 1, UI mapping, desktop/tasks, pipeline, demo outputs, Gymnasium API
 docs/                  demo.gif (README animation), dashboard.png
 main.py                CLI: demo (display / mp4 / gif / png), viewer, collect, train, evaluate
 ```
@@ -225,5 +255,7 @@ main.py                CLI: demo (display / mp4 / gif / png), viewer, collect, t
 1. Vision-based policy: train with `--images` and drop privileged features progressively
    (start with the mouse position, then the click-target coordinates).
 2. Action chunking or a diffusion policy to reduce the remaining wrong key presses.
-3. RL fine-tuning (PPO/SAC) from the BC initialisation using the env's shaped reward.
-4. More apps and long-horizon tasks: drag and drop, file operations, multi-window.
+3. RL fine-tuning (PPO/SAC) from the BC initialisation through the Gymnasium env.
+4. World-model data: domain randomisation (layout, lighting, cameras) and a trajectory
+   logger (images, executed actions, rewards, episode ends, UI state).
+5. More apps and long-horizon tasks: drag and drop, file operations, multi-window.

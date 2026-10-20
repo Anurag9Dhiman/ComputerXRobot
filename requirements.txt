@@ -1,6 +1,7 @@
 mujoco>=3.2
 numpy>=1.24
 pygame>=2.5
+gymnasium>=1.0        # environment/gym_env.py (Gymnasium API)
 torch>=2.1            # learning/ (behaviour cloning); CUDA build on the A100
 imageio>=2.31         # demo --video
 imageio-ffmpeg>=0.4

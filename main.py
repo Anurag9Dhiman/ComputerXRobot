@@ -4,6 +4,7 @@ keyboard and mouse.
     python main.py                         # milestone 1: press "a", verify it in the editor
     python main.py demo --task search --text "robotics research papers" --display
     python main.py demo --task search --video outputs/search.mp4
+    python main.py demo --task search --gif docs/demo.gif --speed 2
     python main.py viewer --task search    # interactive MuJoCo viewer (mjpython on macOS)
     python main.py collect --episodes 30 --out data/demos.npz
     python main.py train --data data/demos.npz --out checkpoints/bc.pt
@@ -73,9 +74,13 @@ def cmd_demo(args) -> int:
     policy = make_policy(args, env)
     print(f"Task: {task.instruction}   (policy: {args.policy})")
 
-    dashboard = writer = window = clock = None
-    want_frames = args.display or args.video or args.screenshot
-    if want_frames:
+    def steps_per_frame(fps: float) -> int:
+        """Control steps between captured frames so playback runs at `args.speed`."""
+        return max(1, round(args.speed / (fps * env.config.control_dt)))
+
+    dashboard = window = clock = None
+    recorders: list[tuple[object, int]] = []  # (writer, capture every n control steps)
+    if args.display or args.video or args.gif or args.screenshot:
         import pygame
 
         from evaluation.dashboard import HEIGHT, WIDTH, Dashboard
@@ -87,29 +92,37 @@ def cmd_demo(args) -> int:
             pygame.display.set_caption("ComputerXRobot")
             clock = pygame.time.Clock()
         if args.video:
-            writer = _VideoWriter(args.video, args.fps)
-    frame_every = max(1, round(1.0 / (args.fps * env.config.control_dt)))
+            recorders.append((_VideoWriter(args.video, args.fps), steps_per_frame(args.fps)))
+        if args.gif:
+            recorders.append((_GifWriter(args.gif, args.gif_fps, args.gif_width), steps_per_frame(args.gif_fps)))
+    display_every = steps_per_frame(args.fps)
 
     def show(frame_surface):
-        if window is not None:
-            import pygame
+        import pygame
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                    raise KeyboardInterrupt
-            window.blit(frame_surface, (0, 0))
-            pygame.display.flip()
-            clock.tick(args.fps * args.speed)
-        if writer is not None:
-            writer.append(frame_surface)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                raise KeyboardInterrupt
+        window.blit(frame_surface, (0, 0))
+        pygame.display.flip()
+        clock.tick(args.fps)
 
     def on_step(env_, obs, info):
         for ev in info.events:
             mark = "ok" if ev.correct else "UNEXPECTED"
             shown = repr(ev.value) if ev.kind == "key" else ev.value
             print(f"  t={ev.time:6.2f}s  {ev.kind:5s} {shown}  [{mark}]")
-        if dashboard is not None and env_.step_count % frame_every == 0:
-            show(dashboard.draw(getattr(policy, "skill", None), args.policy))
+        if dashboard is None:
+            return
+        step = env_.step_count
+        due = [writer for writer, every in recorders if step % every == 0]
+        display_due = window is not None and step % display_every == 0
+        if due or display_due:
+            frame = dashboard.draw(getattr(policy, "skill", None), args.policy)
+            if display_due:
+                show(frame)
+            for writer in due:
+                writer.append(frame)
 
     t0 = time.time()
     try:
@@ -127,11 +140,9 @@ def cmd_demo(args) -> int:
             Path(args.screenshot).parent.mkdir(parents=True, exist_ok=True)
             pygame.image.save(final, args.screenshot)
             print(f"saved screenshot {args.screenshot}")
-        if writer is not None:
-            for _ in range(int(args.fps * 1.5)):  # hold the result on screen
-                writer.append(final)
-            writer.close()
-            print(f"saved video {args.video}")
+        for writer, _ in recorders:
+            writer.finish(final)  # ends on the result, held on screen for a moment
+            print(f"saved {writer.path}")
 
     _print_result(env, metrics, wall)
 
@@ -170,6 +181,7 @@ class _VideoWriter:
     def __init__(self, path: str, fps: int):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fps = fps
         self.count = 0
         try:
             import imageio.v2 as imageio
@@ -190,9 +202,38 @@ class _VideoWriter:
             pygame.image.save(surface, str(self.frame_dir / f"{self.count:05d}.png"))
         self.count += 1
 
-    def close(self) -> None:
+    def finish(self, final_surface, hold_s: float = 1.5) -> None:
+        for _ in range(int(self.fps * hold_s)):
+            self.append(final_surface)
         if self.writer is not None:
             self.writer.close()
+
+
+class _GifWriter:
+    """Looping animated GIF: frames scaled to `width` px with an adaptive 256-colour palette
+    each (no dithering, which suits the flat UI and keeps the file small)."""
+
+    def __init__(self, path: str, fps: float, width: int):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.frame_ms = round(1000 / fps)
+        self.width = width
+        self.frames = []
+
+    def append(self, surface) -> None:
+        import pygame
+        from PIL import Image
+
+        img = Image.fromarray(pygame.surfarray.array3d(surface).transpose(1, 0, 2))
+        if self.width and img.width != self.width:
+            img = img.resize((self.width, round(img.height * self.width / img.width)), Image.LANCZOS)
+        self.frames.append(img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
+
+    def finish(self, final_surface, hold_s: float = 2.5) -> None:
+        self.append(final_surface)
+        durations = [self.frame_ms] * (len(self.frames) - 1) + [round(1000 * hold_s)]
+        self.frames[0].save(self.path, save_all=True, append_images=self.frames[1:], duration=durations,
+                            loop=0, optimize=True)
 
 
 # ---------------------------------------------------------------------------- viewer
@@ -293,10 +334,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_policy_args(p)
     p.add_argument("--display", action="store_true", help="live dashboard window")
     p.add_argument("--video", help="write the dashboard to an .mp4")
+    p.add_argument("--gif", help="write the dashboard to an animated .gif")
+    p.add_argument("--gif-width", type=int, default=800, help="GIF width in pixels")
+    p.add_argument("--gif-fps", type=float, default=10.0, help="GIF frame rate")
     p.add_argument("--screenshot", help="save the final dashboard frame as .png")
     p.add_argument("--camera", default="overview", help="main 3D view camera")
     p.add_argument("--fps", type=int, default=25)
-    p.add_argument("--speed", type=float, default=1.0, help="playback speed for --display")
+    p.add_argument("--speed", type=float, default=1.0, help="playback speed for --display, --video and --gif")
     p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("viewer", help="interactive MuJoCo viewer (mjpython on macOS)")

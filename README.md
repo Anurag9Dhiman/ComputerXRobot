@@ -7,10 +7,13 @@ engine). Key travel and mouse motion are mapped explicitly to UI events, tasks a
 against the desktop state, and a scripted expert, a behaviour-cloning pipeline and an
 evaluation suite are included.
 
-![Dashboard: 3D scene, robot camera, simulated screen, task result](docs/dashboard.png)
+![The robot searches the web: it drags the mouse to the search field, clicks, types the query on the physical keyboard and presses Enter](docs/demo.gif)
 
-*`python main.py demo --task search --text "robotics research papers" --display`: the 3D
-robot, its camera observation, the simulated screen and the task result in one view.*
+*The scripted robot searching for "robotics research papers" (2× speed): it drags the
+physical mouse until the cursor is on the search field, clicks, types the query key by key,
+presses Enter and the results appear. The 3D scene, the robot's camera, the simulated screen
+and the task result are shown together. Regenerate with
+`python main.py demo --task search --text "robotics research papers" --gif docs/demo.gif --speed 2`.*
 
 ## Status
 
@@ -60,6 +63,7 @@ python main.py
 python main.py demo --task search --text "robotics research papers" --display   # live window
 python main.py demo --task open_result --text "mouse control" --video outputs/open_result.mp4
 python main.py demo --task type_text --text "hello world" --screenshot outputs/typing.png
+python main.py demo --task open_app --text files --gif outputs/open_app.gif   # --gif-width, --gif-fps, --speed
 
 # Interactive MuJoCo viewer (rotate/zoom; the monitor updates live). macOS needs mjpython:
 mjpython main.py viewer --task search            # Linux: python main.py viewer ...
@@ -70,7 +74,7 @@ python main.py train --data data/demos.npz --out checkpoints/bc.pt  # ~10 s on C
 python main.py evaluate --policy bc --checkpoint checkpoints/bc.pt --split both --episodes 10
 python main.py demo --policy bc --checkpoint checkpoints/bc.pt --task search --display
 
-python -m pytest -q                                              # 21 tests, ~3 s
+python -m pytest -q                                              # 22 tests, ~3 s
 ```
 
 Tasks (`--task`): `type_key`, `type_text`, `search`, `open_result`, `open_app`. `--text` is
@@ -194,8 +198,9 @@ evaluation/
   task_success.py      episode runner, task suites
   metrics.py           success rate, time, wrong keys, failed clicks, collisions
   dashboard.py         combined 3D / camera / screen / result view
-tests/                 milestone 1, UI mapping, desktop/tasks, end-to-end pipeline
-main.py                CLI: demo, viewer, collect, train, evaluate
+tests/                 milestone 1, UI mapping, desktop/tasks, end-to-end pipeline, demo outputs
+docs/                  demo.gif (README animation), dashboard.png
+main.py                CLI: demo (display / mp4 / gif / png), viewer, collect, train, evaluate
 ```
 
 ## Design notes and limitations

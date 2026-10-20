@@ -1,0 +1,84 @@
+<mujoco model="cxr_desk">
+  <!--
+    Static workspace: floor, desk, monitor (with a dynamic screen texture), mouse pad and a
+    physical mouse. The keyboard lives in keyboard.xml (generated from
+    environment/keyboard_layout.py).
+
+    Monitor screen: the "screen" texture is overwritten at runtime with the simulated desktop
+    (environment/screen.py). Texture row 0 is the top of the screen as seen by the robot.
+
+    Mouse: the shell slides in x/y on the pad (joints mouse_x / mouse_y, with friction loss
+    so it stays put unless dragged) and carries a spring-loaded button (joint mouse_button).
+    The palm rests on the flat rear part of the shell; the finger sits over the button.
+  -->
+  <asset>
+    <texture name="screen" type="2d" builtin="flat" width="640" height="400" rgb1="0.08 0.09 0.11"/>
+    <material name="screen" texture="screen" emission="0.9" specular="0" shininess="0" reflectance="0"/>
+    <mesh name="screen_quad" inertia="shell"
+          vertex="-0.0205 0.24 0.15  -0.0205 -0.24 0.15  -0.0205 -0.24 -0.15  -0.0205 0.24 -0.15"
+          texcoord="0 0  1 0  1 1  0 1"
+          face="0 2 1  0 3 2"/>
+
+    <texture name="floor" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.32 0.33 0.35" rgb2="0.28 0.29 0.31"/>
+    <material name="floor" texture="floor" texrepeat="6 6" reflectance="0.05"/>
+    <material name="desk" rgba="0.66 0.49 0.33 1" specular="0.2"/>
+    <material name="plastic_dark" rgba="0.10 0.10 0.11 1" specular="0.3"/>
+    <material name="plastic_grey" rgba="0.22 0.23 0.25 1" specular="0.3"/>
+    <material name="pad" rgba="0.12 0.13 0.15 1" specular="0.05"/>
+  </asset>
+
+  <default>
+    <default class="env">
+      <geom contype="0" conaffinity="1" friction="1.0 0.02 0.001"/>
+      <default class="env_visual">
+        <geom contype="0" conaffinity="0" group="1"/>
+      </default>
+    </default>
+  </default>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="4 4 0.1" material="floor" class="env"/>
+
+    <!-- Desk: top surface at z = 0.75, front edge at x = 0.29. -->
+    <body name="desk" childclass="env">
+      <geom name="desk_top" type="box" size="0.38 0.68 0.015" pos="0.67 0 0.735" material="desk"/>
+      <geom name="desk_leg1" type="box" size="0.025 0.025 0.36" pos="0.33 0.63 0.36" material="plastic_grey"/>
+      <geom name="desk_leg2" type="box" size="0.025 0.025 0.36" pos="0.33 -0.63 0.36" material="plastic_grey"/>
+      <geom name="desk_leg3" type="box" size="0.025 0.025 0.36" pos="1.01 0.63 0.36" material="plastic_grey"/>
+      <geom name="desk_leg4" type="box" size="0.025 0.025 0.36" pos="1.01 -0.63 0.36" material="plastic_grey"/>
+    </body>
+
+    <!-- Monitor: 0.48 m x 0.30 m screen (16:10), facing the robot (-x). -->
+    <body name="monitor_stand" childclass="env">
+      <geom name="monitor_foot" type="box" size="0.09 0.12 0.005" pos="0.95 0 0.755" material="plastic_dark"/>
+      <geom name="monitor_neck" type="box" size="0.015 0.03 0.08" pos="0.95 0 0.83" material="plastic_dark"/>
+    </body>
+    <body name="monitor" pos="0.92 0 1.07" childclass="env">
+      <geom name="monitor_frame" type="box" size="0.02 0.27 0.17" material="plastic_dark"/>
+      <geom name="screen" type="mesh" mesh="screen_quad" material="screen" class="env_visual"/>
+      <site name="screen_center" pos="-0.021 0 0" size="0.005" group="4"/>
+      <camera name="screen_cam" pos="-0.55 0 0" xyaxes="0 -1 0 0 0 1" fovy="31"/>
+    </body>
+
+    <!-- Mouse pad (top at z = 0.754) and the physical mouse. -->
+    <geom name="mouse_pad" type="box" size="0.13 0.12 0.002" pos="0.47 -0.30 0.752" material="pad" class="env"/>
+    <body name="mouse" pos="0.47 -0.30 0.754" childclass="env">
+      <inertial pos="0 0 0.012" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
+      <joint name="mouse_x" type="slide" axis="1 0 0" range="-0.07 0.07" damping="3" frictionloss="1.0" armature="0.02"/>
+      <joint name="mouse_y" type="slide" axis="0 1 0" range="-0.08 0.08" damping="3" frictionloss="1.0" armature="0.02"/>
+      <geom name="mouse_base" type="box" size="0.055 0.032 0.009" pos="0 0 0.009" material="plastic_dark"/>
+      <!-- Flat palm rest: x in [-0.055, 0.022], top at z = 0.026 (mouse frame). -->
+      <geom name="mouse_rest" type="box" size="0.0385 0.032 0.004" pos="-0.0165 0 0.022" material="plastic_grey"
+            friction="1.5 0.02 0.001"/>
+      <site name="mouse_rest_top" pos="-0.0165 0 0.026" size="0.003" group="4"/>
+      <body name="mouse_button" pos="0.0415 0 0.022">
+        <inertial pos="0 0 0" mass="0.005" diaginertia="1e-6 1e-6 1e-6"/>
+        <joint name="mouse_button" type="slide" axis="0 0 1" range="-0.004 0" stiffness="150" springref="0.003"
+               damping="0.3" armature="0.002" solreflimit="0.005 1"/>
+        <geom name="mouse_button" type="box" size="0.0135 0.03 0.004" rgba="0.30 0.32 0.36 1"/>
+        <site name="mouse_button_top" pos="0 0 0.004" size="0.003" group="4"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

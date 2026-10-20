@@ -1,0 +1,33 @@
+<mujoco model="computer_x_robot">
+  <!--
+    Full scene: robot arm + desk + monitor + keyboard + mouse.
+    Can be opened directly for inspection:  python -m mujoco.viewer --mjcf environment/scene.xml
+    (the monitor and keycaps are blank until environment/screen.py paints them at runtime).
+  -->
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.002" integrator="implicitfast" cone="elliptic" impratio="5"/>
+
+  <visual>
+    <global offwidth="1280" offheight="800" azimuth="200" elevation="-25"/>
+    <headlight ambient="0.35 0.35 0.35" diffuse="0.45 0.45 0.45" specular="0.1 0.1 0.1"/>
+    <quality shadowsize="4096"/>
+    <map znear="0.01"/>
+  </visual>
+
+  <include file="../assets/desk.xml"/>
+  <include file="../assets/keyboard.xml"/>
+  <include file="../assets/robot.xml"/>
+
+  <worldbody>
+    <light name="key_light" pos="0.3 0.6 2.6" dir="0.1 -0.2 -1" directional="true" diffuse="0.55 0.55 0.55"
+           castshadow="true"/>
+    <light name="fill_light" pos="1.5 -1.5 2.0" dir="-0.5 0.5 -0.6" directional="true" diffuse="0.2 0.2 0.2"
+           castshadow="false"/>
+
+    <!-- Observer cameras (not used by the robot policy). -->
+    <camera name="overview" pos="-0.25 -1.00 1.60" xyaxes="0.776 -0.631 0.000 0.290 0.356 0.888" fovy="42"/>
+    <camera name="front_view" pos="1.30 0.85 1.40" xyaxes="-0.707 0.707 0.000 -0.236 -0.236 0.943" fovy="45"/>
+    <camera name="side_view" pos="0.45 -1.35 1.25" xyaxes="1.000 0.000 0.000 0.000 0.246 0.969" fovy="45"/>
+    <camera name="top_view" pos="0.47 -0.10 1.75" xyaxes="0 -1 0 1 0 0" fovy="45"/>
+  </worldbody>
+</mujoco>

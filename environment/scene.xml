@@ -29,5 +29,12 @@
     <camera name="front_view" pos="1.30 0.85 1.40" xyaxes="-0.707 0.707 0.000 -0.236 -0.236 0.943" fovy="45"/>
     <camera name="side_view" pos="0.45 -1.35 1.25" xyaxes="1.000 0.000 0.000 0.000 0.246 0.969" fovy="45"/>
     <camera name="top_view" pos="0.47 -0.10 1.75" xyaxes="0 -1 0 1 0 0" fovy="45"/>
+
+    <!-- Device close-ups framed so legends are legible: image up = away from the robot,
+         image right = the robot's right, so key legends and mouse "L"/"R" read upright.
+         Recommended sizes (H x W): keyboard_cam 256x512, mouse_cam 320x320,
+         screen_cam (in assets/desk.xml) 400x640, i.e. 1:1 with the screen texture. -->
+    <camera name="keyboard_cam" pos="0.47 0.06 1.04" xyaxes="0 -1 0 1 0 0" fovy="32"/>
+    <camera name="mouse_cam" pos="0.47 -0.30 1.17" xyaxes="0 -1 0 1 0 0" fovy="36"/>
   </worldbody>
 </mujoco>

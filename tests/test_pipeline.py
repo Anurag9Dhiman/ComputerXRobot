@@ -17,6 +17,7 @@ from learning.scripted_policy import ScriptedPolicy
         ("search", "robotics research papers"),
         ("open_result", "mouse control"),
         ("open_app", "files"),
+        ("clear_text", "meeting notes"),
     ],
 )
 def test_scripted_expert_solves_task_cleanly(env, task, text):

@@ -8,7 +8,7 @@
     obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
 
 Registered IDs: ComputerXRobot/ComputerUse-v0 (all tasks), TypeKey-v0, TypeText-v0,
-Search-v0, OpenResult-v0, OpenApp-v0. `gym.make("environment.gym_env:ComputerXRobot/...")`
+Search-v0, OpenResult-v0, OpenApp-v0, ClearText-v0. `gym.make("environment.gym_env:ComputerXRobot/...")`
 imports this module automatically.
 
 Action: Box(-1, 1, (4,)) = [dx, dy, dz, finger]. dx..dz move the tool target by up to
@@ -18,7 +18,11 @@ fully extended).
 Observation, by `obs_mode`:
     "state"   Box(66,) float32: proprioception, device state, cursor, click target and the
               next character to type (learning.dataset.low_dim_features)
-    "pixels"  Dict of uint8 images: one entry per camera in `cameras` plus "screen"
+    "pixels"  Dict of uint8 images: one entry per camera in `cameras` plus "screen". Add
+              "keyboard_cam", "mouse_cam" or "screen_cam" for close-ups in which key legends,
+              the L/R mouse buttons and screen text are legible. Image sizes default to
+              computer_env.CAMERA_SIZES (pass image_size as (H, W) or {camera: (H, W)}); the
+              screen defaults to its native 400x640 so text stays readable.
     "both"    the pixel Dict plus "state"
 
 Episodes: each reset samples a task from `tasks` and `split` with the env's RNG, or uses
@@ -27,7 +31,9 @@ its time limit ran out. The reward is the simulation's shaped reward: progress g
 +1 on success, -0.1 per wrong key or failed click.
 
 `info` carries ground truth for every step: task, success, progress, the desktop state
-(text, cursor, page, ...) and the UI events the step produced. `env.unwrapped.expert_action()`
+(text, cursor, page, open menu, ...), every string on the screen with its box
+(`screen_text`), and the UI events the step produced. `env.unwrapped.annotations(camera)`
+returns boxes and labels for every key, mouse button and screen text in a camera image. `env.unwrapped.expert_action()`
 returns the scripted expert's action for the current state, for demonstrations or mixed
 exploration.
 """
@@ -57,8 +63,8 @@ class ComputerUseGymEnv(gym.Env):
         split: str = "train",
         obs_mode: str = "state",
         cameras: tuple[str, ...] | list[str] = ("robot_cam",),
-        image_size: tuple[int, int] = (64, 64),
-        screen_size: tuple[int, int] = (64, 96),
+        image_size: tuple[int, int] | dict[str, tuple[int, int]] | None = None,
+        screen_size: tuple[int, int] = (400, 640),
         render_mode: str | None = None,
     ):
         unknown = set(tasks) - set(TASKS)
@@ -77,7 +83,7 @@ class ComputerUseGymEnv(gym.Env):
             EnvConfig(
                 render_obs=obs_mode != "state",
                 obs_cameras=self.cameras,
-                obs_image_size=tuple(image_size),
+                obs_image_size=image_size if image_size is None or isinstance(image_size, dict) else tuple(image_size),
                 obs_screen_size=tuple(screen_size),
             )
         )
@@ -91,7 +97,7 @@ class ComputerUseGymEnv(gym.Env):
         if obs_mode == "state":
             self.observation_space = state_space
         else:
-            images = {cam: spaces.Box(0, 255, (*image_size, 3), np.uint8) for cam in self.cameras}
+            images = {cam: spaces.Box(0, 255, (*self.sim.camera_size(cam), 3), np.uint8) for cam in self.cameras}
             images["screen"] = spaces.Box(0, 255, (*screen_size, 3), np.uint8)
             if obs_mode == "both":
                 images["state"] = state_space
@@ -158,6 +164,11 @@ class ComputerUseGymEnv(gym.Env):
         normalized = np.array([*(a[:3] / self._max_step), 2.0 * a[3] - 1.0], dtype=np.float32)
         return np.clip(normalized, -1.0, 1.0)
 
+    def annotations(self, camera: str) -> list[dict]:
+        """Ground-truth boxes and labels (keys, L/R mouse buttons, screen text, ...) for
+        `camera` at its observation size; see environment/annotations.py."""
+        return self.sim.annotations(camera)
+
     @property
     def task(self) -> Task:
         return self.sim.task
@@ -191,6 +202,7 @@ class ComputerUseGymEnv(gym.Env):
             "progress": float(status.progress),
             "expected": self.sim.tasks.expectation(),
             "ui_state": self.sim.desktop.state(),
+            "screen_text": [(t["text"], t["bbox"]) for t in self.sim.desktop.text_items],
             "events": [{"kind": e.kind, "value": e.value, "correct": e.correct} for e in events],
         }
 
@@ -202,6 +214,7 @@ ENV_IDS = {
     "ComputerXRobot/Search-v0": {"tasks": ("search",)},
     "ComputerXRobot/OpenResult-v0": {"tasks": ("open_result",)},
     "ComputerXRobot/OpenApp-v0": {"tasks": ("open_app",)},
+    "ComputerXRobot/ClearText-v0": {"tasks": ("clear_text",)},
 }
 
 

@@ -1,13 +1,18 @@
 """Simulated desktop shown on the monitor: a dock, a text editor, a file manager and a
 web browser with an offline search engine.
 
-The desktop is a plain state machine driven by three inputs -- `move_cursor`, `click` and
-`key_press` -- and rendered with pygame into a 640x400 surface, which environment/screen.py
-copies into the monitor texture. Nothing here knows about physics; environment/ui_events.py
-translates physical key/mouse interaction into these calls.
+The desktop is a plain state machine driven by three inputs -- `move_cursor`,
+`click(button)` and `key_press` -- and rendered with pygame into a 640x400 surface, which
+environment/screen.py copies into the monitor texture. Nothing here knows about physics;
+environment/ui_events.py translates physical key/mouse interaction into these calls.
 
 Every clickable element has a widget id (e.g. "browser:search_field", "dock:editor") and a
 screen rectangle, so tasks can say what should be clicked and the scripted expert can find it.
+A right-click opens a context menu whose items are widgets too ("menu:clear", ...); a click
+target with the "right:" prefix ("right:editor:text") means "right-click this widget".
+
+Text is drawn large and dark enough to stay legible in camera images, and every string drawn
+is recorded with its bounding box (`Desktop.text_items`) as ground truth for screen reading.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ C_DOCK = (24, 30, 42)
 C_WINDOW = (250, 250, 252)
 C_TITLE = (226, 229, 235)
 C_TEXT = (30, 32, 36)
-C_MUTED = (110, 116, 126)
+C_MUTED = (78, 84, 96)
 C_BORDER = (190, 195, 205)
 C_FOCUS = (40, 110, 230)
 C_LINK = (26, 72, 190)
@@ -50,11 +55,42 @@ class Fonts:
         return cls._cache[size]
 
 
+# While Desktop.render() runs, every string drawn is appended here as (text, bbox).
+_TEXT_LOG: list | None = None
+
+
 def _text(surf, text, pos, size=18, color=C_TEXT, center=False):
     img = Fonts.get(size).render(text, True, color)
     rect = img.get_rect(center=pos) if center else img.get_rect(topleft=pos)
     surf.blit(img, rect)
+    if _TEXT_LOG is not None and text.strip():
+        _TEXT_LOG.append((text, (rect.left, rect.top, rect.right, rect.bottom)))
     return rect
+
+
+def _fit(text: str, size: int, width: int) -> str:
+    """Truncate `text` with an ellipsis so it fits in `width` pixels."""
+    font = Fonts.get(size)
+    if font.size(text)[0] <= width:
+        return text
+    while text and font.size(text + "...")[0] > width:
+        text = text[:-1]
+    return text.rstrip() + "..."
+
+
+RIGHT_CLICK = "right:"
+
+
+def click_target(widget: str | None, button: str = "left") -> str | None:
+    """Click target id: the widget for a left click, "right:<widget>" for a right click."""
+    return widget if button == "left" else RIGHT_CLICK + (widget or "")
+
+
+def split_click(target: str) -> tuple[str | None, str]:
+    """Inverse of click_target: ("editor:text", "right") for "right:editor:text"."""
+    if target.startswith(RIGHT_CLICK):
+        return target[len(RIGHT_CLICK):] or None, "right"
+    return target, "left"
 
 
 def _wrap(text: str, size: int, width: int) -> list[str]:
@@ -75,8 +111,28 @@ def _wrap(text: str, size: int, width: int) -> list[str]:
 
 @dataclass
 class ClickResult:
-    target: str | None  # widget id under the cursor, None if the click hit nothing
+    target: str | None  # widget the click acted on; None if it hit nothing / only closed a menu
     pos: tuple[int, int]
+    button: str = "left"
+
+
+MENU_W, MENU_ITEM_H = 160, 30
+
+
+@dataclass
+class Menu:
+    """An open context menu: items stacked downward from `pos`."""
+
+    pos: tuple[int, int]
+    items: list[tuple[str, str]]  # (widget id, label)
+
+    def rects(self) -> dict[str, pygame.Rect]:
+        x, y = self.pos
+        return {wid: pygame.Rect(x, y + i * MENU_ITEM_H, MENU_W, MENU_ITEM_H) for i, (wid, _) in enumerate(self.items)}
+
+    @property
+    def rect(self) -> pygame.Rect:
+        return pygame.Rect(*self.pos, MENU_W, MENU_ITEM_H * len(self.items))
 
 
 @dataclass
@@ -109,6 +165,13 @@ class App:
 
     def key(self, char: str) -> bool:
         return False
+
+    def menu_items(self) -> list[tuple[str, str]]:
+        """App-specific context menu entries (widget id, label)."""
+        return []
+
+    def menu_action(self, action: str) -> None:
+        pass
 
     @property
     def focused_widget(self) -> str | None:
@@ -146,11 +209,18 @@ class TextEditor(App):
             self.text += char
         return True
 
+    def menu_items(self):
+        return [("menu:clear", "Clear all")]
+
+    def menu_action(self, action):
+        if action == "clear":
+            self.text, self.focused = "", True
+
     def draw(self, surf, content):
         area = self.layout(content)["editor:text"]
         pygame.draw.rect(surf, (255, 255, 255), area)
         pygame.draw.rect(surf, C_FOCUS if self.focused else C_BORDER, area, 2 if self.focused else 1)
-        _text(surf, self.filename, (area.x + 6, area.y + 6), 16, C_MUTED)
+        _text(surf, self.filename, (area.x + 6, area.y + 6), 19, C_MUTED)
         y = area.y + 28
         lines = _wrap(self.text, 30, area.width - 16) if self.text else [""]
         for line in lines[-9:]:
@@ -185,11 +255,11 @@ class FileManager(App):
             self.desktop.open_app("editor")
 
     def draw(self, surf, content):
-        _text(surf, "Home / Documents", (content.x + 16, content.y + 14), 18, C_MUTED)
+        _text(surf, "Home / Documents", (content.x + 16, content.y + 14), 21, C_MUTED)
         for (name, _), rect in zip(self.FILES, self.layout(content).values()):
-            pygame.draw.rect(surf, (238, 241, 246), rect, border_radius=4)
-            pygame.draw.rect(surf, (120, 140, 170), (rect.x + 8, rect.y + 7, 14, 18), border_radius=2)
-            _text(surf, name, (rect.x + 32, rect.y + 9), 20)
+            pygame.draw.rect(surf, (232, 236, 243), rect, border_radius=4)
+            pygame.draw.rect(surf, (90, 115, 160), (rect.x + 8, rect.y + 7, 14, 18), border_radius=2)
+            _text(surf, name, (rect.x + 32, rect.y + 8), 23)
 
 
 class Browser(App):
@@ -231,8 +301,18 @@ class Browser(App):
             w["browser:search_field"] = pygame.Rect(content.x + 16, content.y + 40, 300, 26)
             w["browser:search_button"] = pygame.Rect(content.x + 322, content.y + 40, 64, 26)
             for i, _ in enumerate(self.results):
-                w[f"browser:result:{i}"] = pygame.Rect(content.x + 16, content.y + 96 + i * 52, 440, 18)
+                w[f"browser:result:{i}"] = pygame.Rect(content.x + 16, content.y + 90 + i * 54, 460, 20)
         return w
+
+    def menu_items(self):
+        return [("menu:back", "Back"), ("menu:home", "Home")]
+
+    def menu_action(self, action):
+        if action == "back":
+            self.back()
+        elif action == "home" and self.page != "home":
+            self.history.append(self._snapshot())
+            self.page, self.query, self.doc, self.field_focused = "home", "", None, False
 
     def submit(self) -> None:
         query = " ".join(self.query.split())
@@ -287,7 +367,7 @@ class Browser(App):
         _text(surf, "<", back.center, 22, C_TEXT, center=True)
         addr = pygame.Rect(back.right + 8, content.y + 5, content.width - 48, 22)
         pygame.draw.rect(surf, (255, 255, 255), addr, border_radius=11)
-        _text(surf, self.url, (addr.x + 10, addr.y + 5), 16, C_MUTED)
+        _text(surf, _fit(self.url, 18, addr.width - 20), (addr.x + 10, addr.y + 4), 18, C_MUTED)
 
         if self.page == "home":
             self._draw_logo(surf, (content.centerx, content.y + 110))
@@ -296,30 +376,33 @@ class Browser(App):
             self._draw_field(surf, w["browser:search_field"], w["browser:search_button"], 18)
             n = len(self.results)
             _text(surf, f"{n} result{'s' if n != 1 else ''}" if n else "No results found",
-                  (content.x + 16, content.y + 74), 15, C_MUTED)
+                  (content.x + 16, content.y + 71), 18, C_MUTED)
             for i, page in enumerate(self.results):
                 r = w[f"browser:result:{i}"]
-                _text(surf, page.title, r.topleft, 20, C_LINK)
-                _text(surf, page.url, (r.x, r.y + 17), 14, C_URL)
-                _text(surf, page.snippet[:78], (r.x, r.y + 30), 14, C_MUTED)
+                _text(surf, _fit(page.title, 23, r.width), r.topleft, 23, C_LINK)
+                _text(surf, page.url, (r.x, r.y + 18), 17, C_URL)
+                _text(surf, _fit(page.snippet, 17, r.width + 60), (r.x, r.y + 33), 17, C_MUTED)
         elif self.page == "doc" and self.doc:
-            _text(surf, self.doc.title, (content.x + 16, content.y + 44), 26)
-            _text(surf, self.doc.url, (content.x + 16, content.y + 68), 15, C_URL)
+            _text(surf, _fit(self.doc.title, 28, content.width - 32), (content.x + 16, content.y + 42), 28)
+            _text(surf, self.doc.url, (content.x + 16, content.y + 68), 18, C_URL)
             y = content.y + 94
-            for line in _wrap(self.doc.snippet + "\n\n" + self.doc.body, 19, content.width - 32):
-                _text(surf, line, (content.x + 16, y), 19)
-                y += 18
+            for line in _wrap(self.doc.snippet + "\n\n" + self.doc.body, 21, content.width - 32):
+                _text(surf, line, (content.x + 16, y), 21)
+                y += 20
 
     def _draw_logo(self, surf, center):
         colors = [(66, 133, 244), (219, 68, 55), (244, 180, 0), (66, 133, 244), (15, 157, 88), (219, 68, 55)]
         font = Fonts.get(56)
         word = "Seeker"
-        width = font.size(word)[0]
+        width, height = font.size(word)
         x = center[0] - width // 2
         for ch, color in zip(word, colors):
             img = font.render(ch, True, color)
             surf.blit(img, img.get_rect(midleft=(x, center[1])))
             x += font.size(ch)[0]
+        if _TEXT_LOG is not None:
+            x0, y0 = center[0] - width // 2, center[1] - height // 2
+            _TEXT_LOG.append((word, (x0, y0, x0 + width, y0 + height)))
 
     def _draw_field(self, surf, field_rect, button_rect, size):
         pygame.draw.rect(surf, (255, 255, 255), field_rect, border_radius=6)
@@ -350,6 +433,8 @@ class Desktop:
         for app in self.apps.values():
             app.reset()
         self.active = active
+        self.menu: Menu | None = None
+        self.text_items: list[dict] = []
         self.cursor = (self.size[0] // 2, self.size[1] // 2)
         self._cursor_f = [float(self.cursor[0]), float(self.cursor[1])]
         self.version = 0  # bumps on every visible change
@@ -382,7 +467,7 @@ class Desktop:
 
     def widgets(self) -> dict[str, pygame.Rect]:
         """All clickable widgets in hit-test order (topmost first)."""
-        out: dict[str, pygame.Rect] = {}
+        out: dict[str, pygame.Rect] = dict(self.menu.rects()) if self.menu else {}
         if self.app:
             out.update(self.app.layout(self.content_rect))
             w = self.window_rect
@@ -417,18 +502,47 @@ class Desktop:
         self._cursor_f = [float(pos[0]), float(pos[1])]
         self.move_cursor(0, 0)
 
-    def click(self) -> ClickResult:
+    def click(self, button: str = "left") -> ClickResult:
         target = self.widget_at(self.cursor)
+        self._changed()
+        if button == "right":
+            self.menu = self._context_menu()
+            return ClickResult(target, self.cursor, "right")
+        if self.menu is not None:  # a left click always closes an open menu
+            self.menu = None
+            if target and target.startswith("menu:"):
+                self._run_menu_item(target)
+                return ClickResult(target, self.cursor)
+            return ClickResult(None, self.cursor)  # clicking elsewhere only dismissed the menu
         if target and target.startswith("dock:"):
             self.open_app(target.split(":", 1)[1])
         elif target == "window:close":
             self.close_app()
         elif self.app and self.window_rect.collidepoint(self.cursor):
             self.app.click(target)
-        self._changed()
         return ClickResult(target, self.cursor)
 
+    def _context_menu(self) -> Menu:
+        if self.app and self.window_rect.collidepoint(self.cursor):
+            items = self.app.menu_items() + [("menu:close", "Close window")]
+        else:
+            items = [(f"menu:open:{name}", f"Open {label}") for name, label in DOCK_APPS]
+        x = min(self.cursor[0], self.size[0] - MENU_W - 2)
+        y = min(self.cursor[1], self.size[1] - MENU_ITEM_H * len(items) - 2)
+        return Menu((x, y), items)
+
+    def _run_menu_item(self, item: str) -> None:
+        if item == "menu:close":
+            self.close_app()
+        elif item.startswith("menu:open:"):
+            self.open_app(item.rsplit(":", 1)[1])
+        elif self.app:
+            self.app.menu_action(item.split(":", 1)[1])
+
     def key_press(self, char: str) -> KeyResult:
+        if self.menu is not None:  # typing closes an open menu
+            self.menu = None
+            self._changed()
         accepted = bool(self.app and self.app.key(char))
         if accepted:
             self._changed()
@@ -436,33 +550,56 @@ class Desktop:
 
     # ---- rendering
     def render(self) -> pygame.Surface:
+        global _TEXT_LOG
         if self._rendered_version == self.version:
             return self._surface
-        s = self._surface
+        _TEXT_LOG = []
+        try:
+            self._draw(self._surface)
+            log = _TEXT_LOG
+        finally:
+            _TEXT_LOG = None
+        self.text_items = [{"text": text, "bbox": bbox} for text, bbox in log]
+        self._rendered_version = self.version
+        return self._surface
+
+    def _draw(self, s: pygame.Surface) -> None:
         s.fill(C_DESKTOP)
         pygame.draw.rect(s, C_DOCK, (0, 0, DOCK_W, self.size[1]))
         widgets = self.widgets()
         for name, label in DOCK_APPS:
             self._draw_icon(s, name, widgets[f"dock:{name}"], active=self.active == name)
-            _text(s, label, (widgets[f"dock:{name}"].centerx, widgets[f"dock:{name}"].bottom + 9), 14,
-                  (220, 225, 235), center=True)
+            _text(s, label, (widgets[f"dock:{name}"].centerx, widgets[f"dock:{name}"].bottom + 10), 17,
+                  (235, 238, 245), center=True)
         if self.app:
             w = self.window_rect
             pygame.draw.rect(s, (20, 30, 50), w.move(3, 3), border_radius=6)
             pygame.draw.rect(s, C_WINDOW, w, border_radius=6)
             pygame.draw.rect(s, C_TITLE, (w.x, w.y, w.width, TITLE_H), border_top_left_radius=6,
                              border_top_right_radius=6)
-            _text(s, self.app.title, (w.x + 10, w.y + 6), 18, C_TEXT)
+            _text(s, self.app.title, (w.x + 10, w.y + 5), 21, C_TEXT)
             close = widgets["window:close"]
             pygame.draw.rect(s, (225, 85, 75), close, border_radius=4)
             _text(s, "x", close.center, 18, (255, 255, 255), center=True)
             self.app.draw(s, self.content_rect)
         else:
-            _text(s, "Click an icon to open an app", (self.size[0] // 2 + DOCK_W // 2, self.size[1] // 2), 22,
-                  (200, 210, 230), center=True)
+            _text(s, "Click an icon to open an app", (self.size[0] // 2 + DOCK_W // 2, self.size[1] // 2), 24,
+                  (225, 232, 245), center=True)
+        if self.menu:
+            self._draw_menu(s)
         self._draw_cursor(s)
-        self._rendered_version = self.version
-        return s
+
+    def _draw_menu(self, s) -> None:
+        box = self.menu.rect
+        if _TEXT_LOG is not None:  # text now hidden under the menu is no longer visible
+            _TEXT_LOG[:] = [(t, b) for t, b in _TEXT_LOG if not box.colliderect(pygame.Rect(b[0], b[1], b[2] - b[0], b[3] - b[1]))]
+        pygame.draw.rect(s, (20, 30, 50), box.move(3, 3), border_radius=4)
+        pygame.draw.rect(s, (255, 255, 255), box, border_radius=4)
+        for (wid, label), rect in zip(self.menu.items, self.menu.rects().values()):
+            if rect.collidepoint(self.cursor):
+                pygame.draw.rect(s, (205, 222, 250), rect.inflate(-4, -4), border_radius=3)
+            _text(s, label, (rect.x + 12, rect.y + 7), 21, C_TEXT)
+        pygame.draw.rect(s, (110, 120, 140), box, 1, border_radius=4)
 
     @staticmethod
     def _draw_icon(s, name, rect, active):
@@ -500,6 +637,7 @@ class Desktop:
             "browser_query": browser.query,
             "browser_last_query": browser.last_query,
             "browser_doc": browser.doc.id if browser.doc else None,
+            "menu": [wid for wid, _ in self.menu.items] if self.menu else None,
         }
 
 

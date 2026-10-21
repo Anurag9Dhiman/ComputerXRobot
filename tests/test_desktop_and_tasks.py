@@ -55,6 +55,50 @@ def test_dock_and_files_open_apps():
     assert d.active is None
 
 
+def test_context_menus():
+    d = Desktop()
+    d.reset(active="browser")
+    d.set_cursor((300, 250))
+    assert d.click("right").button == "right"
+    assert d.state()["menu"] == ["menu:back", "menu:home", "menu:close"]
+    d.set_cursor((150, 100))
+    assert d.click().target is None and d.menu is None  # clicking outside only dismisses it
+    d.set_cursor((300, 250))
+    d.click("right")
+    _click(d, "menu:close")
+    assert d.active is None
+    d.set_cursor((300, 250))
+    d.click("right")  # on the empty desktop the menu opens apps
+    assert d.state()["menu"] == ["menu:open:browser", "menu:open:editor", "menu:open:files"]
+    _click(d, "menu:open:files")
+    assert d.active == "files"
+
+
+def test_clear_text_task_uses_right_click_menu():
+    d = Desktop()
+    task = make_task("clear_text", "meeting notes")
+    task.setup(d)
+    assert d.apps["editor"].text == "meeting notes" and not task.success(d)
+    assert task.expectation(d) == (None, "right:editor:text")
+    d.set_cursor(d.widget_rect("editor:text").center)
+    d.click("right")
+    assert task.expectation(d) == (None, "menu:clear") and task.progress(d) == 0.5
+    _click(d, "menu:clear")
+    assert task.success(d) and task.progress(d) == 1.0
+
+
+def test_screen_text_is_recorded_with_boxes():
+    d = Desktop()
+    d.reset(active="editor")
+    for ch in "hello":
+        d.key_press(ch)
+    d.render()
+    texts = {t["text"]: t["bbox"] for t in d.text_items}
+    assert "hello" in texts and "Text Editor" in texts and "untitled.txt" in texts
+    x0, y0, x1, y1 = texts["hello"]
+    assert d.window_rect.contains((x0, y0, x1 - x0, y1 - y0))
+
+
 def test_keys_typed_without_focus_are_rejected():
     d = Desktop()
     d.reset(active="browser")
@@ -73,5 +117,5 @@ def test_training_text_covers_every_key():
 
 
 def test_test_split_is_unseen():
-    for name in ("type_text", "search", "open_result"):
+    for name in ("type_text", "search", "open_result", "clear_text"):
         assert not set(SPLITS[name]["train"]) & set(SPLITS[name]["test"]), name

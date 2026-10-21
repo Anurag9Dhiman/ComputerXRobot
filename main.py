@@ -6,6 +6,7 @@ keyboard and mouse.
     python main.py demo --task search --video outputs/search.mp4
     python main.py demo --task search --gif docs/demo.gif --speed 2
     python main.py viewer --task search    # interactive MuJoCo viewer (mjpython on macOS)
+    python main.py annotate --camera keyboard_cam --out outputs/keyboard_cam.png
     python main.py collect --episodes 30 --out data/demos.npz
     python main.py train --data data/demos.npz --out checkpoints/bc.pt
     python main.py evaluate --policy bc --checkpoint checkpoints/bc.pt --split both
@@ -165,6 +166,8 @@ def _print_result(env, metrics, wall) -> None:
           f"(sim time {metrics['time']:.2f}s, wall {wall:.2f}s, {metrics['steps']} control steps)")
     if env.task.name in ("type_key", "type_text"):
         print(f"  editor text: {state['editor_text']!r}   (target {env.task.text!r})")
+    elif env.task.name == "clear_text":
+        print(f"  editor text: {state['editor_text']!r}   (started as {env.task.text!r})")
     elif env.task.name in ("search", "open_result"):
         print(f"  browser: page={state['browser_page']} query={state['browser_last_query']!r} "
               f"doc={state['browser_doc']}")
@@ -272,6 +275,40 @@ def cmd_viewer(args) -> int:
     return 0
 
 
+# -------------------------------------------------------------------------- annotate
+def cmd_annotate(args) -> int:
+    import json
+
+    import numpy as np
+    from PIL import Image
+
+    from environment.annotations import draw_annotations
+    from learning.scripted_policy import ScriptedPolicy
+
+    env = ComputerUseEnv(EnvConfig(render_obs=False))
+    env.reset(make_task(args.task, args.text))
+    policy = ScriptedPolicy(env)
+    for _ in range(args.steps):  # optionally advance the expert to a more interesting state
+        env.step(policy.act())
+    height, width = (args.height, args.width) if args.height and args.width else env.camera_size(args.camera)
+    image = env.render(args.camera, height, width)
+    records = env.annotations(args.camera, height, width)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.concatenate([image, draw_annotations(image, records)], axis=1)).save(out)
+    visible = [r for r in records if r["visible"] >= 0.5]
+    print(f"{args.camera} ({height}x{width}): {len(visible)} of {len(records)} components visible")
+    for kind in sorted({r["kind"] for r in visible}):
+        labels = [r["label"] for r in visible if r["kind"] == kind]
+        print(f"  {kind:13s} {len(labels):3d}  {', '.join(map(repr, labels[:12]))}{' ...' if len(labels) > 12 else ''}")
+    print(f"saved {out} (left: camera image, right: with ground-truth boxes)")
+    if args.json:
+        Path(args.json).write_text(json.dumps(records, indent=1))
+        print(f"saved {args.json}")
+    env.close()
+    return 0
+
+
 # ---------------------------------------------------------------------- learning loop
 def cmd_collect(args) -> int:
     from evaluation.task_success import task_suite
@@ -348,6 +385,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_policy_args(p)
     p.add_argument("--speed", type=float, default=1.0)
     p.set_defaults(func=cmd_viewer)
+
+    p = sub.add_parser("annotate", help="render a camera with ground-truth boxes and labels")
+    task_args(p)
+    p.add_argument("--camera", default="keyboard_cam",
+                   help="robot_cam, keyboard_cam, mouse_cam, screen_cam, wrist_cam, overview, ...")
+    p.add_argument("--height", type=int, help="image height (default: the camera's observation size)")
+    p.add_argument("--width", type=int)
+    p.add_argument("--steps", type=int, default=0, help="expert steps to run before rendering")
+    p.add_argument("--out", default="outputs/annotated.png")
+    p.add_argument("--json", help="also write the annotation records as JSON")
+    p.set_defaults(func=cmd_annotate)
 
     p = sub.add_parser("collect", help="collect scripted demonstrations")
     p.add_argument("--tasks", nargs="+", choices=ALL_TASKS, default=ALL_TASKS)

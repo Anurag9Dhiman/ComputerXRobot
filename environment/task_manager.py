@@ -1,7 +1,8 @@
 """Tasks, success checks, rewards and episode bookkeeping.
 
 A task puts the desktop into its initial state, says what it wants next
-(`expectation()` -> (char to type, widget to click)) and decides success from the desktop
+(`expectation()` -> (char to type, click target); a click target "right:<widget>" means a
+right-click) and decides success from the desktop
 state alone -- never from what the robot did -- so scripted and learned policies are judged
 the same way.
 
@@ -11,6 +12,8 @@ Task kinds:
     search       click the search field, type a query, press Enter, see results
     open_result  search, then open a specific result page
     open_app     open an app by clicking its dock icon
+    clear_text   clear prefilled editor text with the right-click menu (right-click, then
+                 left-click "Clear all")
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from environment.browser import Desktop
+from environment.browser import Desktop, click_target, split_click
 from environment.keyboard_layout import TYPEABLE_CHARS
 from environment.ui_events import UIEvent
 from environment.web_content import PAGE_BY_ID, search
@@ -242,8 +245,51 @@ class OpenAppTask(Task):
         return {"task": self.name, "text": self.text}
 
 
+class ClearTextTask(Task):
+    """The editor starts with `text` in it; empty it using the right-click context menu."""
+
+    name = "clear_text"
+
+    def __init__(self, text: str):
+        if not text:
+            raise ValueError("clear_text needs non-empty starting text")
+        self.text = text
+
+    @property
+    def instruction(self):
+        return "Clear the editor with the right-click menu"
+
+    @property
+    def time_limit(self):
+        return 15.0
+
+    def setup(self, desktop):
+        desktop.reset(active="editor")
+        desktop.apps["editor"].text = self.text
+
+    def expectation(self, desktop):
+        if self.success(desktop):
+            return None, None
+        if desktop.active != "editor":
+            return None, "dock:editor"
+        if desktop.menu is not None and "menu:clear" in dict(desktop.menu.items):
+            return None, "menu:clear"
+        return None, click_target("editor:text", "right")
+
+    def progress(self, desktop):
+        if self.success(desktop):
+            return 1.0
+        return 0.5 if desktop.menu is not None and "menu:clear" in dict(desktop.menu.items) else 0.0
+
+    def success(self, desktop):
+        return desktop.active == "editor" and desktop.apps["editor"].text == ""
+
+    def spec(self):
+        return {"task": self.name, "text": self.text}
+
+
 TASKS: dict[str, type[Task]] = {
-    cls.name: cls for cls in (TypeKeyTask, TypeTextTask, SearchTask, OpenResultTask, OpenAppTask)
+    cls.name: cls for cls in (TypeKeyTask, TypeTextTask, SearchTask, OpenResultTask, OpenAppTask, ClearTextTask)
 }
 
 # Disjoint train/test content, so evaluation on the "test" split measures generalisation to
@@ -268,6 +314,10 @@ SPLITS: dict[str, dict[str, list[str]]] = {
         "test": ["robotics research papers", "mouse control"],
     },
     "open_app": {"train": ["browser", "editor", "files"], "test": ["browser", "editor", "files"]},
+    "clear_text": {
+        "train": ["meeting notes", "draft 1", "hello there", "todo: buy milk", "x"],
+        "test": ["shopping list", "quick note 42", "abc"],
+    },
 }
 
 
@@ -340,11 +390,14 @@ class TaskManager:
         return TaskStatus(success, timeout, progress, reward)
 
     def features(self) -> dict:
-        """Task-state observation: what to type / click next and where the target is."""
+        """Task-state observation: what to type / click next, with which mouse button, and
+        where the target is on screen."""
         char, click = self.expectation()
-        rect = self.desktop.widget_rect(click) if click else None
+        widget, button = split_click(click) if click else (None, None)
+        rect = self.desktop.widget_rect(widget) if widget else None
         return {
             "expected_char": char,
             "click_target": click,
+            "click_button": button,
             "click_target_px": rect.center if rect else None,
         }

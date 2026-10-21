@@ -169,22 +169,40 @@ def annotate(env: "ComputerUseEnv", camera: str, height: int, width: int) -> lis
     return a.records
 
 
-def draw_annotations(image: np.ndarray, records: list[dict], min_visible: float = 0.5) -> np.ndarray:
-    """Copy of `image` with each sufficiently visible record's box and label drawn on it."""
+ANNOTATION_COLORS = {"key": (255, 140, 0), "mouse_button": (0, 200, 255), "mouse_wheel": (180, 80, 255),
+                     "screen_text": (40, 220, 90), "cursor": (255, 40, 160)}
+HIGHLIGHT_COLOR = (60, 255, 60)
+
+
+def draw_annotations(image: np.ndarray, records: list[dict], min_visible: float = 0.5,
+                     tags: tuple[str, ...] = ("key", "mouse_button"),
+                     highlight: dict[str, str] | None = None) -> np.ndarray:
+    """Copy of `image` with each sufficiently visible record's box drawn on it.
+
+    tags       kinds whose label is printed above the box
+    highlight  {record name: caption} drawn with a thick bright box, e.g. the key just pressed
+    """
     import pygame
 
     from environment.browser import Fonts
 
-    colors = {"key": (255, 140, 0), "mouse_button": (0, 200, 255), "mouse_wheel": (180, 80, 255),
-              "screen_text": (40, 220, 90), "cursor": (255, 40, 160)}
+    highlight = highlight or {}
     surf = pygame.surfarray.make_surface(np.ascontiguousarray(image.transpose(1, 0, 2)))
     font = Fonts.get(14)
     for r in records:
-        if r["kind"] not in colors or r["visible"] < min_visible:
+        if r["kind"] not in ANNOTATION_COLORS or r["visible"] < min_visible or r["name"] in highlight:
             continue
         x0, y0, x1, y1 = r["bbox"]
-        pygame.draw.rect(surf, colors[r["kind"]], (x0, y0, x1 - x0, y1 - y0), 1)
-        if r["kind"] in ("mouse_button", "key"):
-            tag = font.render(r["label"], True, (0, 0, 0), colors[r["kind"]])
+        color = ANNOTATION_COLORS[r["kind"]]
+        pygame.draw.rect(surf, color, (x0, y0, x1 - x0, y1 - y0), 1)
+        if r["kind"] in tags:
+            tag = font.render(r["label"], True, (0, 0, 0), color)
             surf.blit(tag, (x0, max(0, y0 - tag.get_height())))
+    big = Fonts.get(20)
+    for r in records:
+        if r["name"] in highlight:
+            x0, y0, x1, y1 = r["bbox"]
+            pygame.draw.rect(surf, HIGHLIGHT_COLOR, (x0 - 2, y0 - 2, x1 - x0 + 4, y1 - y0 + 4), 3)
+            tag = big.render(highlight[r["name"]], True, (0, 0, 0), HIGHLIGHT_COLOR)
+            surf.blit(tag, (min(x0, surf.get_width() - tag.get_width()), max(0, y0 - tag.get_height() - 2)))
     return pygame.surfarray.array3d(surf).transpose(1, 0, 2)

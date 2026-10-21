@@ -4,7 +4,9 @@ keyboard and mouse.
     python main.py                         # milestone 1: press "a", verify it in the editor
     python main.py demo --task search --text "robotics research papers" --display
     python main.py demo --task search --video outputs/search.mp4
-    python main.py demo --task search --gif docs/demo.gif --speed 2
+    python main.py demo --task search --gif outputs/search.gif --speed 2
+    python main.py demo --view perception --task search --text "mouse control" \
+        --task clear_text --text "meeting notes" --gif docs/demo.gif --gif-width 960 --speed 1.25   # README GIF
     python main.py viewer --task search    # interactive MuJoCo viewer (mjpython on macOS)
     python main.py annotate --camera keyboard_cam --out outputs/keyboard_cam.png
     python main.py collect --episodes 30 --out data/demos.npz
@@ -71,9 +73,10 @@ def cmd_demo(args) -> int:
     from evaluation.task_success import run_episode
 
     env = ComputerUseEnv(env_config_for(args))
-    task = make_task(args.task, args.text)
+    names = args.task or ["type_key"]
+    texts = args.text or []
+    tasks = [make_task(name, texts[i] if i < len(texts) else None) for i, name in enumerate(names)]
     policy = make_policy(args, env)
-    print(f"Task: {task.instruction}   (policy: {args.policy})")
 
     def steps_per_frame(fps: float) -> int:
         """Control steps between captured frames so playback runs at `args.speed`."""
@@ -84,9 +87,10 @@ def cmd_demo(args) -> int:
     if args.display or args.video or args.gif or args.screenshot:
         import pygame
 
-        from evaluation.dashboard import HEIGHT, WIDTH, Dashboard
+        from evaluation.dashboard import HEIGHT, WIDTH, Dashboard, PerceptionView
 
-        dashboard = Dashboard(env, main_camera=args.camera)
+        view = PerceptionView if args.view == "perception" else Dashboard
+        dashboard = view(env, main_camera=args.camera)
         if args.display:
             pygame.display.init()
             window = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -125,13 +129,22 @@ def cmd_demo(args) -> int:
             for writer in due:
                 writer.append(frame)
 
-    t0 = time.time()
-    try:
-        metrics = run_episode(env, policy, task, on_step)
-    except KeyboardInterrupt:
-        print("interrupted")
-        return 130
-    wall = time.time() - t0
+    all_success = True
+    for i, task in enumerate(tasks):
+        print(f"Task: {task.instruction}   (policy: {args.policy})")
+        t0 = time.time()
+        try:
+            metrics = run_episode(env, policy, task, on_step)
+        except KeyboardInterrupt:
+            print("interrupted")
+            return 130
+        _print_result(env, metrics, time.time() - t0)
+        all_success &= bool(metrics["success"])
+        if dashboard is not None and i < len(tasks) - 1:  # show each result for a second
+            frame = dashboard.draw(getattr(policy, "skill", None), args.policy)
+            for writer, _ in recorders:
+                for _ in range(round(writer.fps)):
+                    writer.append(frame)
 
     if dashboard is not None:
         final = dashboard.draw(getattr(policy, "skill", None), args.policy)
@@ -145,8 +158,6 @@ def cmd_demo(args) -> int:
             writer.finish(final)  # ends on the result, held on screen for a moment
             print(f"saved {writer.path}")
 
-    _print_result(env, metrics, wall)
-
     if window is not None:
         import pygame
 
@@ -156,7 +167,7 @@ def cmd_demo(args) -> int:
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 break
     env.close()
-    return 0 if metrics["success"] else 1
+    return 0 if all_success else 1
 
 
 def _print_result(env, metrics, wall) -> None:
@@ -219,6 +230,7 @@ class _GifWriter:
     def __init__(self, path: str, fps: float, width: int):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fps = fps
         self.frame_ms = round(1000 / fps)
         self.width = width
         self.frames = []
@@ -366,8 +378,14 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--task", choices=ALL_TASKS, default="type_key")
         p.add_argument("--text", help="text / query / app name (default: first test-split item)")
 
-    p = sub.add_parser("demo", help="run one task, optionally with a live dashboard or video")
-    task_args(p)
+    p = sub.add_parser("demo", help="run tasks, optionally with a live dashboard, video or GIF")
+    p.add_argument("--task", choices=ALL_TASKS, action="append",
+                   help="task to run (default type_key); repeat to run several in one recording")
+    p.add_argument("--text", action="append",
+                   help="text / query / app name for the matching --task (default: first test-split item)")
+    p.add_argument("--view", choices=("dashboard", "perception"), default="dashboard",
+                   help="dashboard: scene, robot camera, screen, status; perception: close-up cameras "
+                        "with ground-truth labels (what a model learns from)")
     add_policy_args(p)
     p.add_argument("--display", action="store_true", help="live dashboard window")
     p.add_argument("--video", help="write the dashboard to an .mp4")

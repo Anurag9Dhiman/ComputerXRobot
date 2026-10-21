@@ -9,13 +9,19 @@ legend, mouse button and piece of screen text is legible in camera images and co
 ground-truth boxes. A scripted expert, a behaviour-cloning pipeline and an evaluation suite
 are included.
 
-![The robot searches the web: it drags the mouse to the search field, clicks, types the query on the physical keyboard and presses Enter](docs/demo.gif)
+![What a model sees while the robot works: the keyboard, screen and mouse close-up cameras with every key legend, screen string, the L/R mouse buttons and the cursor labelled; the key or button being pressed is highlighted](docs/demo.gif)
 
-*The scripted robot searching for "robotics research papers" (2× speed): it drags the
-physical mouse until the cursor is on the search field, clicks, types the query key by key,
-presses Enter and the results appear. The 3D scene, the robot's camera, the simulated screen
-and the task result are shown together. Regenerate with
-`python main.py demo --task search --text "robotics research papers" --gif docs/demo.gif --speed 2`.*
+*What a model learns from (1.25× speed). The robot searches for "mouse control": it drags the
+mouse to the search field, left-clicks, types the query and presses Enter. Then it clears
+the editor with the right-click menu: a right-click on **R**, then a left-click on "Clear all"
+with **L**. Each panel is a camera image: `keyboard_cam` (all 44 legends readable),
+`screen_cam` (the display 1:1) and `mouse_cam` (the **L**/**R** buttons). Boxes are the
+ground-truth labels from `env.annotations(camera)`: orange keys, cyan mouse buttons, green
+screen text, pink cursor. The key or button being pressed is highlighted bright green, and keys
+hidden under the hand are counted as not visible. Regenerate with
+`python main.py demo --view perception --task search --text "mouse control" --task clear_text --text "meeting notes" --gif docs/demo.gif --gif-width 960 --speed 1.25`.
+The default `--view dashboard` shows the 3D scene, robot camera, screen and task status
+instead (`docs/dashboard.png`).*
 
 ## Status
 
@@ -68,6 +74,7 @@ python main.py demo --task search --text "robotics research papers" --display   
 python main.py demo --task open_result --text "mouse control" --video outputs/open_result.mp4
 python main.py demo --task type_text --text "hello world" --screenshot outputs/typing.png
 python main.py demo --task open_app --text files --gif outputs/open_app.gif   # --gif-width, --gif-fps, --speed
+python main.py demo --view perception --task search --task clear_text --display  # labelled camera views; repeat --task to chain
 
 # Right-click: open the editor's context menu and choose "Clear all"
 python main.py demo --task clear_text --text "meeting notes" --display
@@ -85,7 +92,7 @@ python main.py train --data data/demos.npz --out checkpoints/bc.pt  # ~10 s on C
 python main.py evaluate --policy bc --checkpoint checkpoints/bc.pt --split both --episodes 10
 python main.py demo --policy bc --checkpoint checkpoints/bc.pt --task search --display
 
-python -m pytest -q                                              # 42 tests, ~6 s
+python -m pytest -q                                              # 43 tests, ~10 s
 ```
 
 Tasks (`--task`): `type_key`, `type_text`, `search`, `open_result`, `open_app`, `clear_text`.
@@ -287,7 +294,7 @@ learning/
 evaluation/
   task_success.py      episode runner, task suites
   metrics.py           success rate, time, wrong keys, failed clicks, collisions
-  dashboard.py         combined 3D / camera / screen / result view
+  dashboard.py         demo views: dashboard (3D / camera / screen / result), perception (labelled cameras)
 tests/                 milestone 1, UI mapping, desktop/tasks, pipeline, demo outputs, Gymnasium API, legibility
 docs/                  demo.gif, right_click.gif, devices.png, dashboard.png
 main.py                CLI: demo (display / mp4 / gif / png), viewer, annotate, collect, train, evaluate

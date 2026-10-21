@@ -5,9 +5,11 @@ result in one frame. Used for the live window (`--display`) and for videos (`--v
     |                              |  robot camera      |
     |        3D scene (overview)   +--------------------+
     |                              |  simulated screen  |
-    +------------------------------+--------------------+
-    |  task / status / metrics     |  wrist camera      |
-    +------------------------------+--------------------+
+    +------------------------------+----------+----+----+
+    |  task / status / metrics     | keyboard |mouse|wrist|
+    +------------------------------+----------+----+----+
+
+The keyboard and mouse panels are the legible close-up cameras (keyboard_cam, mouse_cam).
 """
 
 from __future__ import annotations
@@ -23,7 +25,9 @@ MAIN = pygame.Rect(0, 0, 800, 500)
 ROBOT_CAM = pygame.Rect(800, 0, 480, 300)
 SCREEN = pygame.Rect(800, 300, 480, 300)
 STATUS = pygame.Rect(0, 500, 800, 220)
-WRIST = pygame.Rect(800, 600, 480, 120)
+KEYBOARD = pygame.Rect(800, 600, 240, 120)
+MOUSE = pygame.Rect(1040, 600, 120, 120)
+WRIST = pygame.Rect(1160, 600, 120, 120)
 
 BG = (18, 20, 26)
 FG = (232, 235, 240)
@@ -40,8 +44,8 @@ def _blit_array(surf: pygame.Surface, img: np.ndarray, rect: pygame.Rect) -> Non
     surf.blit(s, rect)
 
 
-def _label(surf, text, rect):
-    font = Fonts.get(20)
+def _label(surf, text, rect, size=20):
+    font = Fonts.get(size)
     img = font.render(text, True, FG)
     bg = pygame.Surface((img.get_width() + 12, img.get_height() + 6), pygame.SRCALPHA)
     bg.fill((0, 0, 0, 150))
@@ -68,10 +72,13 @@ class Dashboard:
         _label(s, "Robot camera (policy input)", ROBOT_CAM)
         _blit_array(s, env.screen_image(), SCREEN)
         _label(s, "Simulated screen", SCREEN)
-        _blit_array(s, env.render("wrist_cam", WRIST.height, WRIST.height * 16 // 10), WRIST)
-        _label(s, "Wrist camera", WRIST)
+        # Close-ups rendered at 2x and scaled down, so the legends stay crisp.
+        for cam, rect, name in (("keyboard_cam", KEYBOARD, "Keyboard"), ("mouse_cam", MOUSE, "Mouse"),
+                                ("wrist_cam", WRIST, "Wrist")):
+            _blit_array(s, env.render(cam, 2 * rect.height, 2 * rect.width), rect)
+            _label(s, name, rect, 16)
         self._draw_status(s, skill, policy_name)
-        for r in (ROBOT_CAM, SCREEN, WRIST, STATUS):
+        for r in (ROBOT_CAM, SCREEN, KEYBOARD, MOUSE, WRIST, STATUS):
             pygame.draw.rect(s, (40, 44, 54), r, 1)
         return s
 
@@ -105,7 +112,7 @@ class Dashboard:
         y += 42
 
         state = env.desktop.state()
-        if env.task.name in ("type_key", "type_text"):
+        if env.task.name in ("type_key", "type_text", "clear_text"):
             typed = state["editor_text"]
         else:
             typed = state["browser_query"]

@@ -3,8 +3,8 @@
 Low-dimensional policy input (`low_dim_features`, FEATURE_DIM values):
     tool target / tracking error / finger extension      proprioception
     mouse offset, palm-on-mouse, key/button down          device state
-    cursor, click target, target - cursor                 what the screen shows
-    mouse button relative to the tool                     where the mouse is
+    cursor, click target, target - cursor, right-click?   what the screen shows / needs
+    needed mouse button relative to the tool              where the mouse is
     one-hot of the next character to type                 task state
 
 Labels ("targets") are the expert's intent rather than its clipped step: the offset from
@@ -37,7 +37,7 @@ from learning.scripted_policy import ScriptedPolicy, waypoint_action
 WORKSPACE_CENTER = np.array([0.51, -0.075, 0.88])
 WORKSPACE_SCALE = 0.2
 CHAR_INDEX = {k.char: i for i, k in enumerate(KEYS)}
-FEATURE_DIM = 3 + 3 + 1 + 2 + 3 + 2 + 1 + 2 + 2 + 3 + len(KEYS)
+FEATURE_DIM = 3 + 3 + 1 + 2 + 3 + 2 + 1 + 2 + 2 + 1 + 3 + len(KEYS)
 IMAGE_KEYS = ("robot_cam", "screen")
 WAYPOINT_SCALE = 0.01  # label units: 1.0 = 1 cm
 WAYPOINT_CLIP = 0.05  # m; longer offsets only matter through their direction
@@ -70,6 +70,7 @@ def low_dim_features(obs: dict) -> np.ndarray:
         put((np.asarray(target, float) - obs["cursor"]) / 50.0)
     else:
         i += 4
+    put(float(obs["click_button"] == "right"))
     put((obs["mouse_button"] - obs["tool_pos"]) * 10.0)
     if obs["expected_char"] is not None:
         f[i + CHAR_INDEX[obs["expected_char"]]] = 1.0

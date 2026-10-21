@@ -60,11 +60,30 @@ def test_mouse_motion_moves_cursor_relative(env):
     assert desktop.cursor == (round(start[0] + CURSOR_GAIN * 0.01), round(start[1] - CURSOR_GAIN * 0.005))
 
 
-def test_mouse_button_clicks_widget_under_cursor(env):
+def test_left_button_clicks_widget_under_cursor(env):
     data, desktop, bridge = _bridge(env)
     desktop.reset(active=None)
     desktop.set_cursor(desktop.widget_rect("dock:browser").center)
-    data.qpos[env.model.joint("mouse_button").qposadr[0]] = -0.0035
+    data.qpos[env.model.joint("mouse_left").qposadr[0]] = -0.0035
     events = bridge.update(data)
     assert [(e.kind, e.value) for e in events] == [("click", "dock:browser")]
     assert desktop.active == "browser"
+
+
+def test_right_button_opens_context_menu(env):
+    data, desktop, bridge = _bridge(env)
+    desktop.apps["editor"].text = "some text"
+    desktop.set_cursor(desktop.widget_rect("editor:text").center)
+    right = env.model.joint("mouse_right").qposadr[0]
+    data.qpos[right] = -0.0035
+    events = bridge.update(data)
+    assert [(e.kind, e.value, e.accepted) for e in events] == [("click", "right:editor:text", True)]
+    assert desktop.state()["menu"] == ["menu:clear", "menu:close"]
+    data.qpos[right] = 0.0
+    bridge.update(data)
+
+    desktop.set_cursor(desktop.widget_rect("menu:clear").center)  # then left-click "Clear all"
+    data.qpos[env.model.joint("mouse_left").qposadr[0]] = -0.0035
+    events = bridge.update(data)
+    assert [(e.kind, e.value) for e in events] == [("click", "menu:clear")]
+    assert desktop.apps["editor"].text == "" and desktop.menu is None

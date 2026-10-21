@@ -8,8 +8,10 @@
     (environment/screen.py). Texture row 0 is the top of the screen as seen by the robot.
 
     Mouse: the shell slides in x/y on the pad (joints mouse_x / mouse_y, with friction loss
-    so it stays put unless dragged) and carries a spring-loaded button (joint mouse_button).
-    The palm rests on the flat rear part of the shell; the finger sits over the button.
+    so it stays put unless dragged) and carries two spring-loaded buttons, left and right
+    (joints mouse_left / mouse_right), labelled "L" and "R", with a scroll wheel between them.
+    The palm rests on the flat rear part of the shell; the finger sits over one button. The
+    white buttons on a grey body on a dark pad, and the legends, let cameras tell the parts apart.
   -->
   <asset>
     <texture name="screen" type="2d" builtin="flat" width="640" height="400" rgb1="0.08 0.09 0.11"/>
@@ -25,7 +27,20 @@
     <material name="desk" rgba="0.66 0.49 0.33 1" specular="0.2"/>
     <material name="plastic_dark" rgba="0.10 0.10 0.11 1" specular="0.3"/>
     <material name="plastic_grey" rgba="0.22 0.23 0.25 1" specular="0.3"/>
-    <material name="pad" rgba="0.12 0.13 0.15 1" specular="0.05"/>
+    <material name="pad" rgba="0.08 0.10 0.16 1" specular="0.05"/>
+    <material name="mouse_shell" rgba="0.18 0.19 0.22 1" specular="0.3"/>
+    <material name="mouse_rest" rgba="0.26 0.28 0.32 1" specular="0.3"/>
+    <material name="mouse_wheel" rgba="0.12 0.12 0.14 1" specular="0.4"/>
+
+    <!-- Button legends "L" / "R", painted at runtime (environment/screen.py). -->
+    <texture name="mouselabels" type="2d" builtin="flat" width="128" height="72" rgb1="0.97 0.97 0.97"/>
+    <material name="mouselabels" texture="mouselabels" specular="0.2"/>
+    <mesh name="label_mouse_left" inertia="shell"
+          vertex="0.0145 0.0133 0.0043  0.0145 -0.0133 0.0043  -0.0145 -0.0133 0.0043  -0.0145 0.0133 0.0043"
+          texcoord="0 0  0.5 0  0.5 1  0 1" face="0 2 1  0 3 2"/>
+    <mesh name="label_mouse_right" inertia="shell"
+          vertex="0.0145 0.0133 0.0043  0.0145 -0.0133 0.0043  -0.0145 -0.0133 0.0043  -0.0145 0.0133 0.0043"
+          texcoord="0.5 0  1 0  1 1  0.5 1" face="0 2 1  0 3 2"/>
   </asset>
 
   <default>
@@ -33,6 +48,11 @@
       <geom contype="0" conaffinity="1" friction="1.0 0.02 0.001"/>
       <default class="env_visual">
         <geom contype="0" conaffinity="0" group="1"/>
+      </default>
+      <default class="mouse_button">
+        <joint type="slide" axis="0 0 1" range="-0.004 0" stiffness="150" springref="0.003" damping="0.3"
+               armature="0.002" solreflimit="0.005 1"/>
+        <geom type="box" size="0.015 0.01375 0.004" rgba="0.97 0.97 0.97 1"/>
       </default>
     </default>
   </default>
@@ -58,7 +78,8 @@
       <geom name="monitor_frame" type="box" size="0.02 0.27 0.17" material="plastic_dark"/>
       <geom name="screen" type="mesh" mesh="screen_quad" material="screen" class="env_visual"/>
       <site name="screen_center" pos="-0.021 0 0" size="0.005" group="4"/>
-      <camera name="screen_cam" pos="-0.55 0 0" xyaxes="0 -1 0 0 0 1" fovy="31"/>
+      <!-- 0.5295 m from the screen plane; fovy makes the 0.30 m screen exactly fill 400 px (1:1 at 400x640). -->
+      <camera name="screen_cam" pos="-0.55 0 0" xyaxes="0 -1 0 0 0 1" fovy="31.633"/>
     </body>
 
     <!-- Mouse pad (top at z = 0.754) and the physical mouse. -->
@@ -67,18 +88,30 @@
       <inertial pos="0 0 0.012" mass="0.1" diaginertia="1e-4 1e-4 1e-4"/>
       <joint name="mouse_x" type="slide" axis="1 0 0" range="-0.07 0.07" damping="3" frictionloss="1.0" armature="0.02"/>
       <joint name="mouse_y" type="slide" axis="0 1 0" range="-0.08 0.08" damping="3" frictionloss="1.0" armature="0.02"/>
-      <geom name="mouse_base" type="box" size="0.055 0.032 0.009" pos="0 0 0.009" material="plastic_dark"/>
+      <!-- Base top at z = 0.014, 5 mm below a fully pressed button, so the finger only meets the button. -->
+      <geom name="mouse_base" type="box" size="0.055 0.032 0.007" pos="0 0 0.007" material="mouse_shell"/>
       <!-- Flat palm rest: x in [-0.055, 0.022], top at z = 0.026 (mouse frame). -->
-      <geom name="mouse_rest" type="box" size="0.0385 0.032 0.004" pos="-0.0165 0 0.022" material="plastic_grey"
+      <geom name="mouse_rest" type="box" size="0.0385 0.032 0.006" pos="-0.0165 0 0.020" material="mouse_rest"
             friction="1.5 0.02 0.001"/>
       <site name="mouse_rest_top" pos="-0.0165 0 0.026" size="0.003" group="4"/>
-      <body name="mouse_button" pos="0.0415 0 0.022">
+      <!-- Buttons: x in [0.025, 0.055]; left on the robot's left (+y), right on its right (-y).
+           Their tops sit 3 mm below the palm rest, so a half-extended finger cannot click. -->
+      <body name="mouse_left" pos="0.040 0.01825 0.019" childclass="mouse_button">
         <inertial pos="0 0 0" mass="0.005" diaginertia="1e-6 1e-6 1e-6"/>
-        <joint name="mouse_button" type="slide" axis="0 0 1" range="-0.004 0" stiffness="150" springref="0.003"
-               damping="0.3" armature="0.002" solreflimit="0.005 1"/>
-        <geom name="mouse_button" type="box" size="0.0135 0.03 0.004" rgba="0.30 0.32 0.36 1"/>
-        <site name="mouse_button_top" pos="0 0 0.004" size="0.003" group="4"/>
+        <joint name="mouse_left"/>
+        <geom name="mouse_left"/>
+        <geom name="label_mouse_left" type="mesh" mesh="label_mouse_left" material="mouselabels" class="env_visual"/>
+        <site name="mouse_left_top" pos="0 0 0.004" size="0.003" group="4"/>
       </body>
+      <body name="mouse_right" pos="0.040 -0.01825 0.019" childclass="mouse_button">
+        <inertial pos="0 0 0" mass="0.005" diaginertia="1e-6 1e-6 1e-6"/>
+        <joint name="mouse_right"/>
+        <geom name="mouse_right"/>
+        <geom name="label_mouse_right" type="mesh" mesh="label_mouse_right" material="mouselabels" class="env_visual"/>
+        <site name="mouse_right_top" pos="0 0 0.004" size="0.003" group="4"/>
+      </body>
+      <geom name="mouse_wheel" type="cylinder" size="0.0065 0.0025" pos="0.040 0 0.023" zaxis="0 1 0"
+            material="mouse_wheel" class="env_visual"/>
     </body>
   </worldbody>
 </mujoco>

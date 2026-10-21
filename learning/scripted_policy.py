@@ -15,8 +15,10 @@ picks a waypoint for the tool plus a finger command:
                                     keycaps from hover height, and the smooth ramp is much
                                     easier for a learned policy to imitate than a step.
 
-  click widget w
-    a key or the button is down  -> retract and hold
+  click widget w with the left or right button (target "w" or "right:w")
+    a key or a button is down    -> retract and hold
+    palm on the mouse, finger    -> lift off and re-land with the finger over the other
+      over the other button         button
     hand not on the mouse        -> glide toward the mouse; the target height drops as the
                                     hand gets close and the last 2 cm are approached
                                     geometrically, so the palm lands softly on the mouse
@@ -40,20 +42,23 @@ from __future__ import annotations
 
 import numpy as np
 
+from environment.browser import split_click
 from environment.computer_env import ComputerUseEnv
 
 HOVER = 0.012  # palm height above the key tops while typing (m)
 KEY_PRESS_CMD = 0.75  # finger command for key presses (~22 mm extension)
-CLICK_CMD = 0.30  # finger command for mouse clicks (~9 mm extension)
+CLICK_CMD = 0.50  # finger command for mouse clicks (~15 mm; buttons sit 3 mm below the palm rest)
 FINGER_RETRACTED = 0.002  # m; finger counts as retracted below this extension
 PALM_PRESS_DEPTH = 0.006  # target below the mouse surface so friction drags the mouse
 GLIDE_HEIGHT = 0.015  # approach height above the press point far from the mouse
-SOFT_LANDING = (0.02, 0.35)  # within 2 cm of the press point, cover 35% of the distance per step
+SOFT_LANDING = (0.02, 0.35, 0.002)  # within 2 cm of the press point: 35% of the distance per
+# step, but at least 2 mm, so the motion never fades to nothing just above the mouse
 LIFT_HEIGHT = 0.02  # how high to lift off the mouse before flying to the keyboard
 PRESS_RAMP = (0.003, 0.006)  # full press within 3 mm of the key centre, none beyond 6 mm
 DRAG_GAIN = 0.25  # fraction of the remaining cursor error corrected per control step
 CLICK_RAMP_PX = (3.0, 6.0)  # full click within 3 px of the widget centre, none beyond 6 px
 CURSOR_KEEP_PX = 8.0  # a click in progress finishes unless the cursor is pushed this far
+WRONG_BUTTON_DIST = 0.01  # m; the buttons' centres are 36.5 mm apart
 
 
 def waypoint_action(offset: np.ndarray, finger: float, max_step: float) -> np.ndarray:
@@ -81,7 +86,8 @@ class ScriptedPolicy:
     def act(self, obs: dict | None = None) -> np.ndarray:
         char, click = self.env.tasks.expectation()
         if click is not None:
-            self.skill = f"click {click}"
+            widget, button = split_click(click)
+            self.skill = f"{'right-click' if button == 'right' else 'click'} {widget}"
             self._click(click)
         elif char is not None:
             self.skill = f"press {char!r}"
@@ -129,23 +135,30 @@ class ScriptedPolicy:
         self.noise_scale = 1.0 if dist > 0.01 else 0.3
 
     # --------------------------------------------------------------- clicking
-    def _click(self, widget: str) -> None:
+    def _click(self, target: str) -> None:
         env, devices = self.env, self.env.devices
-        rect = env.desktop.widget_rect(widget)
+        widget, which = split_click(target)
+        rect = env.desktop.widget_rect(widget) if widget else None
         if rect is None or devices.key_down.any() or devices.button_down:
             return self._hold()
 
-        button = env.mouse_button_top()
+        button = env.mouse_button_top(which)
         surface = env.mouse_rest_top()[2]
         press_z = surface - PALM_PRESS_DEPTH
+        hand = env.controller.tool_pos(env.data)
+        if devices.palm_on_mouse and not self._finger_out() and np.linalg.norm(hand[:2] - button[:2]) > WRONG_BUTTON_DIST:
+            self.waypoint = np.array([*env.tool_target[:2], surface + LIFT_HEIGHT])  # wrong button: lift off
+            self.finger, self.noise_scale = 0.0, 0.3
+            return
         if not self._on_mouse(button, surface):
             if self._finger_out():
                 return self._hold()
             dist = np.linalg.norm(button[:2] - env.tool_target[:2])
             goal = np.array([button[0], button[1], press_z + min(GLIDE_HEIGHT, dist)])
             offset = goal - env.tool_target
-            if np.linalg.norm(offset) < SOFT_LANDING[0]:
-                offset *= SOFT_LANDING[1]
+            dist_3d = np.linalg.norm(offset)
+            if dist_3d < SOFT_LANDING[0]:
+                offset *= max(SOFT_LANDING[1], min(1.0, SOFT_LANDING[2] / max(dist_3d, 1e-9)))
             self.waypoint = env.tool_target + offset
             self.finger, self.noise_scale = 0.0, (1.0 if dist > 0.03 else 0.1)
             return

@@ -11,13 +11,18 @@ Action (4,): [dx, dy, dz, finger]
     finger      finger extension command in [0, 1] (0 = retracted)
 
 Observation (dict):
-    robot_cam / wrist_cam / ...  RGB images from `obs_cameras` (if render_obs)
+    robot_cam / keyboard_cam / ... RGB images from `obs_cameras` (if render_obs); sizes per
+                                 camera from `obs_image_size` (default: CAMERA_SIZES)
     screen                       RGB image of the simulated display (if render_obs)
     qpos, qvel                   arm joints + finger (6,)
     tool_pos, tool_target        (3,)
     mouse_pos (2,) metres, cursor (2,) pixels, key_down, button_down, palm_on_mouse
-    mouse_button (3,)            world position of the mouse button's top face
-    expected_char, click_target, click_target_px   task state (see TaskManager.features)
+    mouse_button (3,)            top of the mouse button the task needs next (left by default)
+    expected_char, click_target, click_button, click_target_px
+                                 task state (see TaskManager.features)
+
+`annotations(camera)` returns ground-truth boxes and labels for every key, mouse button and
+piece of screen text visible in a camera image (environment/annotations.py).
 """
 
 from __future__ import annotations
@@ -33,11 +38,26 @@ from control.contact_detection import DeviceMonitor
 from control.robot_controller import RobotController
 from environment.browser import Desktop
 from environment.keyboard_layout import CAP_CENTER_Z, CAP_HALF_HEIGHT, KEY_BY_CHAR
-from environment.screen import SceneRenderer, ScreenTexture, paint_keycap_labels
+from environment.screen import SceneRenderer, ScreenTexture, paint_keycap_labels, paint_mouse_labels
 from environment.task_manager import Task, TaskManager, TaskStatus, make_task
 from environment.ui_events import PhysicalUIBridge, UIEvent
 
 SCENE_PATH = Path(__file__).resolve().parent / "scene.xml"
+
+# Default (H, W) per camera. The device cameras are sized so legends and screen text stay
+# legible: ~32 px per key in keyboard_cam, ~35 px per mouse button in mouse_cam, and
+# screen_cam 1:1 with the 640x400 screen texture.
+CAMERA_SIZES: dict[str, tuple[int, int]] = {
+    "robot_cam": (240, 320),
+    "wrist_cam": (240, 320),
+    "keyboard_cam": (256, 512),
+    "mouse_cam": (320, 320),
+    "screen_cam": (400, 640),
+    "overview": (400, 640),
+    "front_view": (400, 640),
+    "side_view": (400, 640),
+    "top_view": (400, 640),
+}
 
 
 @dataclass
@@ -45,10 +65,12 @@ class EnvConfig:
     control_dt: float = 0.02  # 50 Hz control
     max_step: float = 0.006  # m per control step (0.3 m/s)
     obs_cameras: tuple[str, ...] = ("robot_cam",)
-    obs_image_size: tuple[int, int] = (128, 128)  # (H, W)
-    obs_screen_size: tuple[int, int] = (100, 160)  # (H, W)
+    # (H, W) for every camera, a {camera: (H, W)} dict, or None for CAMERA_SIZES.
+    obs_image_size: tuple[int, int] | dict[str, tuple[int, int]] | None = None
+    obs_screen_size: tuple[int, int] = (400, 640)  # (H, W); native resolution keeps text legible
     render_obs: bool = True  # False -> no images in observations (fast data collection)
-    home_tool_pos: tuple[float, float, float] = (0.47, 0.06, 0.82)
+    # Home pose: beside the keyboard, so the top-down keyboard camera sees every key at reset.
+    home_tool_pos: tuple[float, float, float] = (0.40, -0.12, 0.86)
     workspace_low: tuple[float, float, float] = (0.30, -0.45, 0.765)
     workspace_high: tuple[float, float, float] = (0.72, 0.30, 1.00)
 
@@ -75,13 +97,14 @@ class ComputerUseEnv:
         self.tasks = TaskManager(self.desktop)
         self.screen = ScreenTexture(self.model)
         paint_keycap_labels(self.model)
+        paint_mouse_labels(self.model)
         self._renderers: dict[tuple[int, int], SceneRenderer] = {}
         self._screen_version = -1
 
         self.task = task or make_task("type_key", "a")
         self._low = np.array(self.config.workspace_low)
         self._high = np.array(self.config.workspace_high)
-        self._button_site = self.model.site("mouse_button_top").id
+        self._button_sites = {b: self.model.site(f"mouse_{b}_top").id for b in ("left", "right")}
         self._rest_site = self.model.site("mouse_rest_top").id
         self._key_tops = self._compute_key_tops()
         self.tool_target = np.array(self.config.home_tool_pos, dtype=float)
@@ -98,8 +121,9 @@ class ComputerUseEnv:
         """World position of the centre of a keycap's top face (key at rest)."""
         return self._key_tops[char].copy()
 
-    def mouse_button_top(self) -> np.ndarray:
-        return self.data.site_xpos[self._button_site].copy()
+    def mouse_button_top(self, button: str = "left") -> np.ndarray:
+        """World position of the centre of a mouse button's top face."""
+        return self.data.site_xpos[self._button_sites[button]].copy()
 
     def mouse_rest_top(self) -> np.ndarray:
         return self.data.site_xpos[self._rest_site].copy()
@@ -155,21 +179,42 @@ class ComputerUseEnv:
             "key_down": bool(self.devices.key_down.any()),
             "button_down": bool(self.devices.button_down),
             "palm_on_mouse": bool(self.devices.palm_on_mouse),
-            "mouse_button": self.mouse_button_top(),
+            "mouse_button": self.mouse_button_top(feats["click_button"] or "left"),
             **feats,
         }
         if self.config.render_obs:
-            h, w = self.config.obs_image_size
             for cam in self.config.obs_cameras:
-                obs[cam] = self.render(cam, h, w)
+                obs[cam] = self.render(cam, *self.camera_size(cam))
             obs["screen"] = self.screen_image(self.config.obs_screen_size)
         return obs
 
-    def render(self, camera: str = "overview", height: int = 400, width: int = 640) -> np.ndarray:
+    def camera_size(self, camera: str) -> tuple[int, int]:
+        """(H, W) used for `camera` in observations."""
+        size = self.config.obs_image_size
+        if isinstance(size, dict):
+            size = size.get(camera)
+        return tuple(size or CAMERA_SIZES.get(camera, (240, 320)))
+
+    def _renderer(self, height: int, width: int) -> SceneRenderer:
         key = (height, width)
         if key not in self._renderers:
             self._renderers[key] = SceneRenderer(self.model, height, width, self.screen)
-        return self._renderers[key].render(self.data, camera)
+        return self._renderers[key]
+
+    def render(self, camera="overview", height: int = 400, width: int = 640) -> np.ndarray:
+        return self._renderer(height, width).render(self.data, camera)
+
+    def segmentation(self, camera, height: int = 400, width: int = 640) -> np.ndarray:
+        """(H, W) geom id per pixel (-1 for background) from `camera`."""
+        return self._renderer(height, width).segmentation(self.data, camera)
+
+    def annotations(self, camera: str, height: int | None = None, width: int | None = None) -> list[dict]:
+        """Ground-truth boxes/labels of keys, mouse buttons, screen text, ... seen by `camera`."""
+        from environment.annotations import annotate
+
+        if height is None or width is None:
+            height, width = self.camera_size(camera)
+        return annotate(self, camera, height, width)
 
     def screen_image(self, size: tuple[int, int] | None = None) -> np.ndarray:
         """The simulated display as an (H, W, 3) array, optionally resized to size=(H, W)."""

@@ -81,3 +81,15 @@ def test_rgb_array_render_is_the_dashboard():
     frame = env.render()
     assert frame.shape == (720, 1280, 3) and frame.dtype == np.uint8
     env.close()
+
+
+def test_device_cameras_and_ground_truth_through_gym():
+    cams = ("robot_cam", "keyboard_cam", "mouse_cam", "screen_cam")
+    env = gym.make("ComputerXRobot/ClearText-v0", obs_mode="pixels", cameras=cams)
+    obs, info = env.reset(seed=0)
+    assert obs["keyboard_cam"].shape == (256, 512, 3) and obs["mouse_cam"].shape == (320, 320, 3)
+    assert obs["screen"].shape == (400, 640, 3)  # native resolution: text stays legible
+    assert info["text"] in [t for t, _ in info["screen_text"]]  # the prefilled editor text
+    buttons = [r["label"] for r in env.unwrapped.annotations("mouse_cam") if r["kind"] == "mouse_button"]
+    assert sorted(buttons) == ["L", "R"]
+    env.close()

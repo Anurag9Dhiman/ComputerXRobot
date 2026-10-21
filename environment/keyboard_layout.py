@@ -1,8 +1,8 @@
 """Keyboard layout and MJCF generator.
 
 The layout is the single source of truth for the physical keyboard: key positions, key
-names, the characters they produce and where each label lives in the keycap texture atlas.
-`assets/keyboard.xml` is generated from it:
+names, the characters they produce, their legends and colours, and where each legend lives in
+the keycap texture atlas. `assets/keyboard.xml` is generated from it:
 
     python -m environment.keyboard_layout          # rewrite assets/keyboard.xml
 
@@ -26,9 +26,17 @@ KEY_PRELOAD_OFFSET = 0.003  # springref above the rest position -> ~0.45 N prelo
 PLATE_HALF_HEIGHT = 0.006
 KEYBOARD_POS = (0.47, 0.06, 0.75)  # keyboard body origin (plate bottom, on the desk)
 
-ATLAS_UNIT_PX = 64  # atlas pixels per 1u
-ATLAS_WIDTH = 1024
-ATLAS_HEIGHT = 320  # 5 rows * 64 px
+ATLAS_UNIT_PX = 128  # atlas pixels per 1u (a 1u legend is ~108 px square)
+ATLAS_WIDTH = 2048
+ATLAS_HEIGHT = 640  # 5 rows * 128 px
+
+# High-contrast legends so a camera (and a model) can read every key: black on white
+# keycaps, and white on dark slate for Enter / Backspace / Space so they stand out as a group.
+CAP_RGB = (0.94, 0.94, 0.92)
+SPECIAL_CAP_RGB = (0.22, 0.30, 0.42)
+LEGEND_RGB = (0.04, 0.04, 0.06)
+SPECIAL_LEGEND_RGB = (0.97, 0.97, 0.97)
+PLATE_RGB = (0.07, 0.07, 0.08)
 
 # (row stagger in units, [key, ...]); a key is a char or (name, width_in_units).
 ROWS: list[tuple[float, list]] = [
@@ -41,7 +49,7 @@ ROWS: list[tuple[float, list]] = [
 
 _PUNCT_NAMES = {"-": "minus", ";": "semicolon", ",": "comma", ".": "period", "/": "slash"}
 _SPECIAL_CHARS = {"backspace": "\b", "enter": "\n", "space": " "}
-_SPECIAL_LABELS = {"backspace": "Bksp", "enter": "Enter", "space": ""}
+_SPECIAL_LABELS = {"backspace": "Backspace", "enter": "Enter", "space": "Space"}
 
 TOTAL_WIDTH_UNITS = 13.0
 
@@ -63,6 +71,18 @@ class KeySpec:
     @property
     def joint(self) -> str:
         return f"key_{self.name}"
+
+    @property
+    def special(self) -> bool:
+        return self.name in _SPECIAL_CHARS
+
+    @property
+    def cap_rgb(self) -> tuple[float, float, float]:
+        return SPECIAL_CAP_RGB if self.special else CAP_RGB
+
+    @property
+    def legend_rgb(self) -> tuple[float, float, float]:
+        return SPECIAL_LEGEND_RGB if self.special else LEGEND_RGB
 
     @property
     def cap_half_size(self) -> tuple[float, float]:
@@ -133,7 +153,7 @@ def generate_keyboard_xml() -> str:
             f'      <body name="{key.body}" pos="{_fmt(key.pos[0], key.pos[1], plate_top)}" childclass="key">\n'
             f'        <inertial pos="0 0 {CAP_CENTER_Z:g}" mass="0.005" diaginertia="1e-7 1e-7 1e-7"/>\n'
             f'        <joint name="{key.joint}"/>\n'
-            f'        <geom name="{key.body}" size="{_fmt(hx, hy, CAP_HALF_HEIGHT)}"/>\n'
+            f'        <geom name="{key.body}" size="{_fmt(hx, hy, CAP_HALF_HEIGHT)}" rgba="{_fmt(*key.cap_rgb)} 1"/>\n'
             f'        <geom name="label_{key.name}" class="key_label" mesh="label_{key.name}"/>\n'
             f"      </body>"
         )
@@ -145,8 +165,7 @@ def generate_keyboard_xml() -> str:
     <default class="key">
       <joint type="slide" axis="0 0 1" range="{_fmt(-KEY_TRAVEL)} 0" stiffness="{KEY_STIFFNESS:g}"
              springref="{KEY_PRELOAD_OFFSET:g}" damping="0.3" armature="0.002" solreflimit="0.005 1"/>
-      <geom type="box" pos="0 0 {CAP_CENTER_Z:g}" contype="0" conaffinity="1" friction="0.8 0.02 0.001"
-            rgba="0.16 0.17 0.19 1"/>
+      <geom type="box" pos="0 0 {CAP_CENTER_Z:g}" contype="0" conaffinity="1" friction="0.8 0.02 0.001"/>
       <default class="key_label">
         <geom type="mesh" pos="0 0 0" material="keylabels" contype="0" conaffinity="0" group="1" rgba="1 1 1 1"/>
       </default>
@@ -154,16 +173,17 @@ def generate_keyboard_xml() -> str:
   </default>
 
   <asset>
+    <!-- Legends are painted into this atlas at runtime (environment/screen.py). -->
     <texture name="keylabels" type="2d" builtin="flat" width="{ATLAS_WIDTH}" height="{ATLAS_HEIGHT}"
-             rgb1="0.16 0.17 0.19"/>
-    <material name="keylabels" texture="keylabels" specular="0.2"/>
+             rgb1="{_fmt(*CAP_RGB)}"/>
+    <material name="keylabels" texture="keylabels" specular="0.1"/>
 {chr(10).join(meshes)}
   </asset>
 
   <worldbody>
     <body name="keyboard" pos="{_fmt(*KEYBOARD_POS)}">
       <geom name="keyboard_plate" type="box" size="{_fmt(plate_hx, plate_hy, PLATE_HALF_HEIGHT)}"
-            pos="0 0 {PLATE_HALF_HEIGHT:g}" contype="0" conaffinity="1" rgba="0.07 0.07 0.08 1"/>
+            pos="0 0 {PLATE_HALF_HEIGHT:g}" contype="0" conaffinity="1" rgba="{_fmt(*PLATE_RGB)} 1"/>
 {chr(10).join(bodies)}
     </body>
   </worldbody>

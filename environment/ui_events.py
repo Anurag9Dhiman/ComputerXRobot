@@ -5,7 +5,9 @@ system. This module is the explicit mapping between the two worlds:
 
     keyboard key travels past its actuation point  ->  key press   (desktop.key_press)
     mouse shell slides on the pad                  ->  cursor move (desktop.move_cursor)
-    mouse button travels past its actuation point  ->  click       (desktop.click)
+    left mouse button past its actuation point     ->  click       (desktop.click("left"))
+    right mouse button past its actuation point    ->  right-click (desktop.click("right"):
+                                                       opens the context menu)
 
 The mouse is relative, like a real one: cursor motion is proportional to how far the mouse
 moved since the last update (CURSOR_GAIN pixels per metre) and the cursor is clamped at the
@@ -22,7 +24,7 @@ import mujoco
 import numpy as np
 
 from control.contact_detection import DeviceMonitor
-from environment.browser import Desktop
+from environment.browser import Desktop, click_target
 
 CURSOR_GAIN = 6400.0  # pixels per metre of mouse travel (~10 cm across the 640 px screen)
 
@@ -31,7 +33,8 @@ CURSOR_GAIN = 6400.0  # pixels per metre of mouse travel (~10 cm across the 640 
 class UIEvent:
     time: float
     kind: str  # "key" | "click"
-    value: str | None  # character for keys, widget id (or None) for clicks
+    value: str | None  # character for keys; click target for clicks: widget id, "right:<widget>"
+    # for right-clicks, None for a left click that hit nothing
     accepted: bool  # key reached a text field / click hit a widget
     expected: str | None = None  # what the task wanted at that moment (char or widget id)
 
@@ -74,6 +77,8 @@ class PhysicalUIBridge:
                 ui_events.append(UIEvent(data.time, "key", ev.char, result.accepted, expected))
             elif ev.kind == "button_down":
                 expected = expectation()[1] if expectation else None
-                result = self.desktop.click()
-                ui_events.append(UIEvent(data.time, "click", result.target, result.target is not None, expected))
+                result = self.desktop.click(ev.name)
+                accepted = result.target is not None or ev.name == "right"  # a right-click always opens a menu
+                value = click_target(result.target, ev.name)
+                ui_events.append(UIEvent(data.time, "click", value, accepted, expected))
         return ui_events

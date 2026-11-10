@@ -3,9 +3,10 @@
 **Embodied computer use.** A robot arm must operate a computer through its physical devices:
 press keys on a 44-key keyboard and drag and click a two-button mouse. The goal is to complete
 desktop tasks: typing, opening apps and files, right-click menus, web search, and multi-step
-edits. Success is judged only from the state of the simulated desktop. Every test episode
-uses strings, queries or files never seen in training, and three test splits also shift the
-scene outside the training distribution.
+edits. Success is judged only from the state of the simulated desktop. Test episodes use
+strings, queries and files held out from training (tasks with a fixed set, such as single keys
+or apps, reuse it), and three test splits also shift the scene outside the training
+distribution.
 
 The benchmark measures what screen-only computer-use agents and language-conditioned
 manipulation benchmarks each leave out:
@@ -250,7 +251,7 @@ all selection was done on `val`.
    `test` it is as fast as the oracle (4.2 s mean time to success) with almost no errors.
 2. **Device layout is the hardest shift:** 63.9 ± 9.9, a 32-point drop.
    - BC still types: `type_key` 100, `type_text` 95.
-   - It loses the mouse when the mouse sits further right than in training: `clear_text` 20,
+   - It loses the mouse when the mouse is placed beyond its training range: `clear_text` 20,
      `write_note` 33, `open_app` 63.
 3. **Device dynamics cost 11 points:** 84.8 ± 1.5. An unseen cursor gain and mouse friction
    mainly hurt the right-click and long-horizon tasks (`write_note` 50).

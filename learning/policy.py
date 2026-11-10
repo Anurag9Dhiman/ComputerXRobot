@@ -66,7 +66,7 @@ class BCNetwork(nn.Module):
 def train_bc(
     demos: Demonstrations,
     out_path: str | Path,
-    epochs: int = 40,
+    epochs: int = 80,
     batch_size: int = 512,
     lr: float = 1e-3,
     use_images: bool = False,
@@ -74,8 +74,14 @@ def train_bc(
     val_fraction: float = 0.1,
     seed: int = 0,
     verbose: bool = True,
+    hidden: int = 256,
+    loss_beta: float = 0.05,
 ) -> dict:
-    """Fit a BCNetwork to demonstrations; returns the training history."""
+    """Fit a BCNetwork to demonstrations; returns the training history.
+
+    hidden     width of the MLP's three hidden layers
+    loss_beta  smooth-L1 transition point (label units); smaller is closer to pure L1
+    """
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     dev = pick_device(device)
@@ -94,7 +100,7 @@ def train_bc(
     targets = torch.from_numpy(demos.targets).to(dev)
     imgs = {k: torch.from_numpy(demos.images[k]).to(dev) for k in image_keys}
 
-    net = BCNetwork(demos.features.shape[1], image_keys).to(dev)
+    net = BCNetwork(demos.features.shape[1], image_keys, hidden=hidden).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     # Smooth L1 keeps millimetre precision near the goal; the finger command (range 0-0.75)
@@ -104,7 +110,7 @@ def train_bc(
     def loss_on(idx: np.ndarray) -> torch.Tensor:
         i = torch.from_numpy(idx).to(dev)
         pred = net(feats[i], {k: v[i] for k, v in imgs.items()})
-        err = nn.functional.smooth_l1_loss(pred, targets[i], reduction="none", beta=0.05)
+        err = nn.functional.smooth_l1_loss(pred, targets[i], reduction="none", beta=loss_beta)
         return (err * weights).mean()
 
     history = {"train": [], "val": []}
@@ -134,6 +140,8 @@ def train_bc(
         {
             "state_dict": net.state_dict(),
             "feature_dim": demos.features.shape[1],
+            "hidden": hidden,
+            "loss_beta": loss_beta,
             "image_keys": image_keys,
             "image_shapes": {k: tuple(demos.images[k].shape[1:]) for k in image_keys},
             "history": history,
@@ -157,7 +165,7 @@ class BCPolicy:
         ckpt = torch.load(checkpoint, map_location=self.device, weights_only=False)
         self.image_keys = tuple(ckpt["image_keys"])
         self.image_shapes = ckpt.get("image_shapes", {})
-        self.net = BCNetwork(ckpt["feature_dim"], self.image_keys).to(self.device)
+        self.net = BCNetwork(ckpt["feature_dim"], self.image_keys, hidden=ckpt.get("hidden", 256)).to(self.device)
         self.net.load_state_dict(ckpt["state_dict"])
         self.net.eval()
         self.max_step = max_step

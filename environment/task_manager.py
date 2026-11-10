@@ -6,14 +6,17 @@ right-click) and decides success from the desktop
 state alone -- never from what the robot did -- so scripted and learned policies are judged
 the same way.
 
-Task kinds:
-    type_key     press one key; the character must appear in the text editor (milestone 1)
-    type_text    type a string into the text editor
-    search       click the search field, type a query, press Enter, see results
-    open_result  search, then open a specific result page
-    open_app     open an app by clicking its dock icon
-    clear_text   clear prefilled editor text with the right-click menu (right-click, then
-                 left-click "Clear all")
+Task kinds, by difficulty level (number of distinct sub-goals / skills chained):
+    L1 type_key      press one key; the character must appear in the text editor (milestone 1)
+    L1 open_app      open an app by clicking its dock icon
+    L1 close_window  close the open app with the window's close button
+    L2 type_text     type a string into the text editor
+    L2 clear_text    clear prefilled editor text with the right-click menu (right-click, then
+                     left-click "Clear all")
+    L2 open_file     open the Files app, then open a named file in the editor
+    L3 search        click the search field, type a query, press Enter, see results
+    L3 open_result   search, then open a specific result page
+    L4 write_note    open the editor, clear the old draft with the right-click menu, type a note
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ def _prefix_fraction(current: str, target: str) -> float:
 
 class Task:
     name = "task"
+    level = 1  # difficulty level (see module docstring)
 
     @property
     def instruction(self) -> str:
@@ -74,6 +78,7 @@ class Task:
 
 class TypeTextTask(Task):
     name = "type_text"
+    level = 2
 
     def __init__(self, text: str):
         bad = set(text) - set(TYPEABLE_CHARS)
@@ -114,6 +119,7 @@ class TypeKeyTask(TypeTextTask):
     """Milestone 1: one physical key press -> one character in the editor."""
 
     name = "type_key"
+    level = 1
 
     def __init__(self, text: str):
         if len(text) != 1:
@@ -127,6 +133,7 @@ class TypeKeyTask(TypeTextTask):
 
 class SearchTask(Task):
     name = "search"
+    level = 3
 
     def __init__(self, text: str):
         bad = set(text) - set(TYPEABLE_CHARS)
@@ -178,6 +185,7 @@ class OpenResultTask(SearchTask):
     """Search for `text` and open the result page `page_id` (default: the top hit)."""
 
     name = "open_result"
+    level = 3
 
     def __init__(self, text: str, page_id: str | None = None):
         super().__init__(text)
@@ -218,6 +226,7 @@ class OpenResultTask(SearchTask):
 
 class OpenAppTask(Task):
     name = "open_app"
+    level = 1
 
     def __init__(self, text: str):
         if text not in ("browser", "editor", "files"):
@@ -249,6 +258,7 @@ class ClearTextTask(Task):
     """The editor starts with `text` in it; empty it using the right-click context menu."""
 
     name = "clear_text"
+    level = 2
 
     def __init__(self, text: str):
         if not text:
@@ -288,8 +298,141 @@ class ClearTextTask(Task):
         return {"task": self.name, "text": self.text}
 
 
+class CloseWindowTask(Task):
+    """`text` names the app that starts open; close its window."""
+
+    name = "close_window"
+    level = 1
+
+    def __init__(self, text: str):
+        if text not in ("browser", "editor", "files"):
+            raise ValueError(f"unknown app {text!r}")
+        self.text = text
+
+    @property
+    def instruction(self):
+        return f"Close the {self.text} window"
+
+    @property
+    def time_limit(self):
+        return 12.0
+
+    def setup(self, desktop):
+        desktop.reset(active=self.text)
+
+    def expectation(self, desktop):
+        return (None, None) if self.success(desktop) else (None, "window:close")
+
+    def success(self, desktop):
+        return desktop.active is None
+
+    def spec(self):
+        return {"task": self.name, "text": self.text}
+
+
+class OpenFileTask(Task):
+    """Open the Files app, then the file `text`; it must end up open in the editor."""
+
+    name = "open_file"
+    level = 2
+
+    def __init__(self, text: str):
+        from environment.browser import FileManager
+
+        names = [name for name, _ in FileManager.FILES]
+        if text not in names:
+            raise ValueError(f"unknown file {text!r}; choose from {names}")
+        self.text, self.index = text, names.index(text)
+
+    @property
+    def instruction(self):
+        return f"Open the file {self.text}"
+
+    @property
+    def time_limit(self):
+        return 15.0
+
+    def setup(self, desktop):
+        desktop.reset(active=None)
+
+    def expectation(self, desktop):
+        if self.success(desktop):
+            return None, None
+        if desktop.active == "files":
+            return None, f"files:item:{self.index}"
+        return None, "dock:files"
+
+    def progress(self, desktop):
+        return 1.0 if self.success(desktop) else 0.5 * (desktop.active == "files")
+
+    def success(self, desktop):
+        editor = desktop.apps["editor"]
+        return desktop.active == "editor" and editor.filename == self.text
+
+    def spec(self):
+        return {"task": self.name, "text": self.text}
+
+
+class WriteNoteTask(Task):
+    """Long horizon: open the editor from the dock, clear the old draft with the right-click
+    menu, then type `text`. Chains a left click, a right-click, a menu choice and typing."""
+
+    name = "write_note"
+    level = 4
+    OLD_DRAFT = "old draft"
+
+    def __init__(self, text: str):
+        bad = set(text) - set(TYPEABLE_CHARS)
+        if bad:
+            raise ValueError(f"cannot type {sorted(bad)} on the simulated keyboard")
+        if self.OLD_DRAFT in text:
+            raise ValueError("the note must not contain the old draft")
+        self.text = text
+
+    @property
+    def instruction(self):
+        return f'Replace the draft in the editor with "{self.text}"'
+
+    @property
+    def time_limit(self):
+        return 20.0 + 1.0 * len(self.text)
+
+    def setup(self, desktop):
+        desktop.reset(active=None)
+        desktop.apps["editor"].text = self.OLD_DRAFT
+
+    def expectation(self, desktop):
+        editor = desktop.apps["editor"]
+        if self.success(desktop):
+            return None, None
+        if desktop.active != "editor":
+            return None, "dock:editor"
+        if self.OLD_DRAFT in editor.text:
+            menu_has_clear = desktop.menu is not None and "menu:clear" in dict(desktop.menu.items)
+            return None, "menu:clear" if menu_has_clear else click_target("editor:text", "right")
+        if not editor.focused:
+            return None, "editor:text"
+        return _typing_expectation(editor.text, self.text), None
+
+    def progress(self, desktop):
+        editor = desktop.apps["editor"]
+        if desktop.active != "editor":
+            return 0.0
+        if self.OLD_DRAFT in editor.text:
+            return 0.1
+        return 0.3 + 0.7 * _prefix_fraction(editor.text, self.text)
+
+    def success(self, desktop):
+        return desktop.active == "editor" and desktop.apps["editor"].text == self.text
+
+    def spec(self):
+        return {"task": self.name, "text": self.text}
+
+
 TASKS: dict[str, type[Task]] = {
-    cls.name: cls for cls in (TypeKeyTask, TypeTextTask, SearchTask, OpenResultTask, OpenAppTask, ClearTextTask)
+    cls.name: cls
+    for cls in (TypeKeyTask, OpenAppTask, CloseWindowTask, TypeTextTask, ClearTextTask, OpenFileTask,
+                SearchTask, OpenResultTask, WriteNoteTask)
 }
 
 # Disjoint train/test content, so evaluation on the "test" split measures generalisation to
@@ -314,6 +457,12 @@ SPLITS: dict[str, dict[str, list[str]]] = {
         "test": ["robotics research papers", "mouse control"],
     },
     "open_app": {"train": ["browser", "editor", "files"], "test": ["browser", "editor", "files"]},
+    "close_window": {"train": ["browser", "editor"], "test": ["files"]},
+    "open_file": {"train": ["notes.txt", "todo.txt", "ideas.txt"], "test": ["papers.txt", "readme.txt"]},
+    "write_note": {
+        "train": ["meeting at noon", "buy milk", "robot demo", "call bob 5pm", "draft two"],
+        "test": ["send report", "lab at 9", "fix bug 12"],
+    },
     "clear_text": {
         "train": ["meeting notes", "draft 1", "hello there", "todo: buy milk", "x"],
         "test": ["shopping list", "quick note 42", "abc"],

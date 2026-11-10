@@ -5,6 +5,8 @@ Low-dimensional policy input (`low_dim_features`, FEATURE_DIM values):
     mouse offset, palm-on-mouse, key/button down          device state
     cursor, click target, target - cursor, right-click?   what the screen shows / needs
     needed mouse button relative to the tool              where the mouse is
+    keyboard position relative to the tool                where the keyboard is (it moves
+                                                          between scenes)
     one-hot of the next character to type                 task state
 
 Labels ("targets") are the expert's intent rather than its clipped step: the offset from
@@ -37,7 +39,7 @@ from learning.scripted_policy import ScriptedPolicy, waypoint_action
 WORKSPACE_CENTER = np.array([0.51, -0.075, 0.88])
 WORKSPACE_SCALE = 0.2
 CHAR_INDEX = {k.char: i for i, k in enumerate(KEYS)}
-FEATURE_DIM = 3 + 3 + 1 + 2 + 3 + 2 + 1 + 2 + 2 + 1 + 3 + len(KEYS)
+FEATURE_DIM = 3 + 3 + 1 + 2 + 3 + 2 + 1 + 2 + 2 + 1 + 3 + 3 + len(KEYS)
 IMAGE_KEYS = ("robot_cam", "screen")
 WAYPOINT_SCALE = 0.01  # label units: 1.0 = 1 cm
 WAYPOINT_CLIP = 0.05  # m; longer offsets only matter through their direction
@@ -72,6 +74,7 @@ def low_dim_features(obs: dict) -> np.ndarray:
         i += 4
     put(float(obs["click_button"] == "right"))
     put((obs["mouse_button"] - obs["tool_pos"]) * 10.0)
+    put((obs["keyboard_pos"] - obs["tool_pos"]) * 10.0)
     if obs["expected_char"] is not None:
         f[i + CHAR_INDEX[obs["expected_char"]]] = 1.0
     i += len(KEYS)
@@ -147,19 +150,21 @@ def collect_demonstrations(
     with_images: bool = False,
     keep_failures: bool = False,
     verbose: bool = True,
+    variations: list | None = None,
 ) -> Demonstrations:
     """Roll out the scripted expert on `tasks` and record (features, expert target) pairs.
 
     noise         perturbation size as a fraction of the max step per control step
     perturb_prob  per-step probability of starting a 3-9 step perturbation
+    variations    optional SceneVariation per task (environment/variation.py)
     """
     rng = np.random.default_rng(seed)
     expert = ScriptedPolicy(env)
     max_step = env.config.max_step
     feats, targets, eps, specs = [], [], [], []
     images: dict[str, list] = {k: [] for k in IMAGE_KEYS} if with_images else {}
-    for task in tasks:
-        obs = env.reset(task)
+    for i, task in enumerate(tasks):
+        obs = env.reset(task, variation=variations[i] if variations else None)
         expert.reset()
         ep_feats, ep_targets, ep_imgs = [], [], {k: [] for k in images}
         done = False

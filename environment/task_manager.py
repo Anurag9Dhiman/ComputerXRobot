@@ -503,6 +503,7 @@ class TaskManager:
     desktop: Desktop
     task: Task | None = None
     events: list[UIEvent] = field(default_factory=list)
+    time_scale: float = 1.0  # multiplies every task's time limit (1.5 under realistic physics)
 
     def reset(self, task: Task, time: float = 0.0) -> None:
         self.task = task
@@ -535,7 +536,7 @@ class TaskManager:
         progress = self.task.progress(self.desktop)
         reward = (progress - self._last_progress) + (1.0 if success else 0.0) - 0.1 * self._new_errors
         self._last_progress, self._new_errors = progress, 0
-        timeout = not success and time - self.start_time >= self.task.time_limit
+        timeout = not success and time - self.start_time >= self.task.time_limit * self.time_scale
         return TaskStatus(success, timeout, progress, reward)
 
     def features(self) -> dict:

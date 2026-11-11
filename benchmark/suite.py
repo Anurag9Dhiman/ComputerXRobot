@@ -10,6 +10,14 @@ environment/task_manager.SPLITS) with a *scene* distribution (environment/variat
     test_visual    held-out content    ood_visual       unseen lighting, colours, wallpaper, camera offset
     test_dynamics  held-out content    ood_dynamics     unseen cursor gain, key stiffness, mouse friction
 
+Hard tier: realistic physics with hidden dynamics (environment/dynamics.py), which the agent
+never observes and has to infer from how the world responds:
+
+    hard_train     training content    id scenes, real_id dynamics
+    hard_val       training content    id scenes, real_id dynamics (own seeds)
+    hard_test      held-out content    id scenes, real_id dynamics
+    hard_test_ood  held-out content    id scenes, real_ood dynamics (beyond every training range)
+
 Every episode is fully determined by its EpisodeSpec (task, text, scene distribution, seed),
 and the specs of a split are a pure function of the benchmark version: seeds come from a
 stable hash of (split, task, index), so two machines evaluate exactly the same episodes.
@@ -24,6 +32,8 @@ import numpy as np
 
 from environment.task_manager import SPLITS as CONTENT_SPLITS
 from environment.task_manager import TASKS, Task, make_task
+from environment.dynamics import HiddenDynamics, sample_dynamics
+from environment.keyboard_layout import KEYS
 from environment.variation import SceneVariation, sample_variation
 
 
@@ -32,6 +42,11 @@ class SplitSpec:
     content: str  # "train" | "test"
     scene: str  # variation distribution
     description: str
+    dynamics: str = "none"  # hidden-dynamics distribution (environment/dynamics.py)
+
+    @property
+    def physics(self) -> str:
+        return "nominal" if self.dynamics == "none" else "realistic"
 
 
 SPLITS: dict[str, SplitSpec] = {
@@ -41,8 +56,15 @@ SPLITS: dict[str, SplitSpec] = {
     "test_layout": SplitSpec("test", "ood_layout", "held-out content, keyboard and mouse moved beyond the training range"),
     "test_visual": SplitSpec("test", "ood_visual", "held-out content, unseen lighting / colours / wallpaper / camera offset"),
     "test_dynamics": SplitSpec("test", "ood_dynamics", "held-out content, unseen cursor gain / key stiffness / mouse friction"),
+    "hard_train": SplitSpec("train", "id", "realistic physics, hidden dynamics (training range)", "real_id"),
+    "hard_val": SplitSpec("train", "id", "realistic physics, hidden dynamics (training range), own seeds", "real_id"),
+    "hard_test": SplitSpec("test", "id", "realistic physics, held-out content, hidden dynamics (training range)",
+                           "real_id"),
+    "hard_test_ood": SplitSpec("test", "id", "realistic physics, held-out content, hidden dynamics beyond every "
+                                             "training range", "real_ood"),
 }
 TEST_SPLITS = ("test", "test_layout", "test_visual", "test_dynamics")
+HARD_TEST_SPLITS = ("hard_test", "hard_test_ood")
 TASK_ORDER = tuple(TASKS)  # sorted by level in task_manager
 EPISODES_PER_TASK = 20  # per task and test split -> 180 episodes per split
 
@@ -61,6 +83,7 @@ class EpisodeSpec:
     text: str
     scene: str
     seed: int
+    dynamics: str = "none"
 
     def make_task(self) -> Task:
         return make_task(self.task, self.text)
@@ -68,8 +91,18 @@ class EpisodeSpec:
     def variation(self) -> SceneVariation:
         return sample_variation(self.scene, np.random.default_rng(self.seed))
 
+    def hidden_dynamics(self) -> HiddenDynamics:
+        return sample_dynamics(self.dynamics, np.random.default_rng(_seed(self.seed, "dynamics")), len(KEYS))
+
+    @property
+    def physics(self) -> str:
+        return "nominal" if self.dynamics == "none" else "realistic"
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if self.dynamics == "none":  # v1.0 episode records are unchanged
+            d.pop("dynamics")
+        return d
 
 
 def episodes(split: str, tasks: tuple[str, ...] | list[str] | None = None,
@@ -93,5 +126,6 @@ def episodes(split: str, tasks: tuple[str, ...] | list[str] | None = None,
                 text=texts[order[i % len(texts)]],
                 scene=spec.scene,
                 seed=_seed(split, task, i),
+                dynamics=spec.dynamics,
             ))
     return out

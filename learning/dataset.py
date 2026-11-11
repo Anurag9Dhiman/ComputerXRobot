@@ -95,6 +95,55 @@ def decode_target(target: np.ndarray, max_step: float) -> np.ndarray:
     return waypoint_action(np.asarray(target[:3], float) * WAYPOINT_SCALE, float(target[3]), max_step)
 
 
+def normalize_action(action: np.ndarray, max_step: float) -> np.ndarray:
+    """Environment action -> [dx, dy, dz] / max_step and the finger command."""
+    return np.array([*(np.asarray(action[:3]) / max_step), action[3]], dtype=np.float32)
+
+
+def history_dim(history: int) -> int:
+    return FEATURE_DIM * (history + 1) + 4 * history
+
+
+def stack_history(features: np.ndarray, actions: np.ndarray, episode: np.ndarray, history: int) -> np.ndarray:
+    """Inputs for a history-conditioned policy: the current features, the previous `history`
+    feature vectors and the previous `history` commanded actions (zeros before an episode
+    starts). This is what lets a policy infer hidden dynamics such as control latency or the
+    cursor gain from the response to its own recent actions."""
+    n = len(features)
+    parts = [features]
+    for k in range(1, history + 1):
+        prev_f = np.zeros_like(features)
+        prev_f[k:] = features[:-k]
+        prev_f[np.r_[np.zeros(min(k, n), bool), episode[k:] != episode[:-k]]] = 0.0
+        parts.append(prev_f)
+    for k in range(1, history + 1):
+        prev_a = np.zeros_like(actions)
+        prev_a[k:] = actions[:-k]
+        prev_a[np.r_[np.zeros(min(k, n), bool), episode[k:] != episode[:-k]]] = 0.0
+        parts.append(prev_a)
+    return np.concatenate(parts, axis=1).astype(np.float32)
+
+
+class HistoryBuffer:
+    """Online counterpart of stack_history for running a policy step by step."""
+
+    def __init__(self, history: int):
+        self.history = history
+        self.reset()
+
+    def reset(self) -> None:
+        self.features = [np.zeros(FEATURE_DIM, np.float32)] * self.history
+        self.actions = [np.zeros(4, np.float32)] * self.history
+
+    def inputs(self, features: np.ndarray) -> np.ndarray:
+        return np.concatenate([features, *self.features, *self.actions]).astype(np.float32)
+
+    def push(self, features: np.ndarray, action: np.ndarray) -> None:
+        if self.history:
+            self.features = [features, *self.features[:-1]]
+            self.actions = [np.asarray(action, np.float32), *self.actions[:-1]]
+
+
 @dataclass
 class Demonstrations:
     features: np.ndarray  # (N, FEATURE_DIM) float32
@@ -102,6 +151,7 @@ class Demonstrations:
     episode: np.ndarray  # (N,) int32
     images: dict[str, np.ndarray]  # name -> (N, H, W, 3) uint8 (may be empty)
     task_specs: list[dict]  # one per episode
+    actions: np.ndarray | None = None  # (N, 4) commanded actions, normalised (for history inputs)
 
     def __len__(self) -> int:
         return len(self.targets)
@@ -115,6 +165,7 @@ class Demonstrations:
             targets=self.targets,
             episode=self.episode,
             task_specs=np.array([json.dumps(s) for s in self.task_specs]),
+            **({"actions": self.actions} if self.actions is not None else {}),
             **{f"image_{k}": v for k, v in self.images.items()},
         )
 
@@ -123,7 +174,8 @@ class Demonstrations:
         z = np.load(path)
         images = {k[len("image_"):]: z[k] for k in z.files if k.startswith("image_")}
         specs = [json.loads(s) for s in z["task_specs"]]
-        return cls(z["features"], z["targets"], z["episode"], images, specs)
+        actions = z["actions"] if "actions" in z.files else None
+        return cls(z["features"], z["targets"], z["episode"], images, specs, actions)
 
     @classmethod
     def concatenate(cls, parts: list["Demonstrations"]) -> "Demonstrations":
@@ -138,6 +190,7 @@ class Demonstrations:
             np.concatenate(episodes),
             {k: np.concatenate([p.images[k] for p in parts]) for k in keys},
             [s for p in parts for s in p.task_specs],
+            np.concatenate([p.actions for p in parts]) if all(p.actions is not None for p in parts) else None,
         )
 
 
@@ -151,37 +204,51 @@ def collect_demonstrations(
     keep_failures: bool = False,
     verbose: bool = True,
     variations: list | None = None,
+    dynamics: list | None = None,
+    student=None,
 ) -> Demonstrations:
     """Roll out the scripted expert on `tasks` and record (features, expert target) pairs.
 
     noise         perturbation size as a fraction of the max step per control step
     perturb_prob  per-step probability of starting a 3-9 step perturbation
     variations    optional SceneVariation per task (environment/variation.py)
+    dynamics      optional HiddenDynamics per task (realistic physics; environment/dynamics.py)
+    student       optional policy with reset() and act(obs) (DAgger): its actions are executed
+                  instead of the expert's, and the expert only labels the states the student
+                  visits. Pass keep_failures=True to keep the episodes it fails, which carry
+                  most of the corrections.
     """
     rng = np.random.default_rng(seed)
     expert = ScriptedPolicy(env)
     max_step = env.config.max_step
-    feats, targets, eps, specs = [], [], [], []
+    feats, targets, actions, eps, specs = [], [], [], [], []
     images: dict[str, list] = {k: [] for k in IMAGE_KEYS} if with_images else {}
     for i, task in enumerate(tasks):
-        obs = env.reset(task, variation=variations[i] if variations else None)
+        obs = env.reset(task, variation=variations[i] if variations else None,
+                        dynamics=dynamics[i] if dynamics else None)
         expert.reset()
-        ep_feats, ep_targets, ep_imgs = [], [], {k: [] for k in images}
+        if student is not None:
+            student.reset()
+        ep_feats, ep_targets, ep_actions, ep_imgs = [], [], [], {k: [] for k in images}
         done = False
         push, push_steps = np.zeros(3), 0
         while not done:
             action = expert.act(obs)
             ep_feats.append(low_dim_features(obs))
-            ep_targets.append(encode_target(expert.waypoint - env.tool_target, expert.finger))
+            ep_targets.append(encode_target(expert.waypoint - env.planned_tool_target(), expert.finger))
             for k in images:
                 ep_imgs[k].append(obs[k])
             if push_steps == 0 and rng.random() < perturb_prob:
                 direction = rng.normal(size=3)
                 push, push_steps = direction / np.linalg.norm(direction) * noise * max_step, int(rng.integers(3, 10))
-            executed = action.copy()
-            if push_steps:
+            if student is not None:
+                executed = np.asarray(student.act(obs), float)
+            else:
+                executed = action.copy()
+            if push_steps and student is None:
                 executed[:3] += push * expert.noise_scale
                 push_steps -= 1
+            ep_actions.append(normalize_action(executed, max_step))
             obs, _, done, _ = env.step(executed)
         ok = env.status.success
         if verbose:
@@ -190,6 +257,7 @@ def collect_demonstrations(
         if ok or keep_failures:
             feats += ep_feats
             targets += ep_targets
+            actions += ep_actions
             eps += [len(specs)] * len(ep_targets)
             specs.append(task.spec())
             for k in images:
@@ -200,4 +268,5 @@ def collect_demonstrations(
         np.asarray(eps, np.int32),
         {k: np.asarray(v, np.uint8) for k, v in images.items()},
         specs,
+        np.asarray(actions, np.float32).reshape(-1, 4),
     )

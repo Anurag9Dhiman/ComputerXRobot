@@ -1,0 +1,140 @@
+{
+ "track": "dynamics-prediction",
+ "context": 20,
+ "horizon": 20,
+ "results": {
+  "persistence|hard_test": {
+   "windows": 2104,
+   "mouse_windows": 263,
+   "cursor_px@1": 8.197285652160645,
+   "hand_mm@1": 3.40486741065979,
+   "cursor_px@5": 38.236351013183594,
+   "hand_mm@5": 16.12095832824707,
+   "cursor_px@10": 68.85584259033203,
+   "hand_mm@10": 30.16092872619629,
+   "cursor_px@20": 106.25191497802734,
+   "hand_mm@20": 51.506309509277344
+  },
+  "kinematic|hard_test": {
+   "windows": 2104,
+   "mouse_windows": 263,
+   "cursor_px@1": 27.32271957397461,
+   "hand_mm@1": 8.728923797607422,
+   "cursor_px@5": 33.50554656982422,
+   "hand_mm@5": 9.149404525756836,
+   "cursor_px@10": 55.18467330932617,
+   "hand_mm@10": 9.464892387390137,
+   "cursor_px@20": 135.08734130859375,
+   "hand_mm@20": 10.088014602661133
+  },
+  "mlp (seed 0)|hard_test": {
+   "windows": 2104,
+   "mouse_windows": 263,
+   "cursor_px@1": 2.6678466796875,
+   "hand_mm@1": 0.569204568862915,
+   "cursor_px@5": 6.087247848510742,
+   "hand_mm@5": 1.1666206121444702,
+   "cursor_px@10": 9.107254981994629,
+   "hand_mm@10": 1.6264162063598633,
+   "cursor_px@20": 14.005289077758789,
+   "hand_mm@20": 2.556607246398926
+  },
+  "mlp (seed 1)|hard_test": {
+   "windows": 2104,
+   "mouse_windows": 263,
+   "cursor_px@1": 2.590452194213867,
+   "hand_mm@1": 0.5703811645507812,
+   "cursor_px@5": 6.317485809326172,
+   "hand_mm@5": 1.2051712274551392,
+   "cursor_px@10": 9.318455696105957,
+   "hand_mm@10": 1.6599839925765991,
+   "cursor_px@20": 14.36911392211914,
+   "hand_mm@20": 2.534052848815918
+  },
+  "mlp (seed 2)|hard_test": {
+   "windows": 2104,
+   "mouse_windows": 263,
+   "cursor_px@1": 2.7185211181640625,
+   "hand_mm@1": 0.5661728978157043,
+   "cursor_px@5": 5.9722514152526855,
+   "hand_mm@5": 1.1835753917694092,
+   "cursor_px@10": 9.200591087341309,
+   "hand_mm@10": 1.644190788269043,
+   "cursor_px@20": 14.383251190185547,
+   "hand_mm@20": 2.56779408454895
+  },
+  "persistence|hard_test_ood": {
+   "windows": 3550,
+   "mouse_windows": 1666,
+   "cursor_px@1": 5.218799114227295,
+   "hand_mm@1": 2.9994959831237793,
+   "cursor_px@5": 18.531566619873047,
+   "hand_mm@5": 11.013971328735352,
+   "cursor_px@10": 31.544410705566406,
+   "hand_mm@10": 20.16031265258789,
+   "cursor_px@20": 47.08902359008789,
+   "hand_mm@20": 35.1622314453125
+  },
+  "kinematic|hard_test_ood": {
+   "windows": 3550,
+   "mouse_windows": 1666,
+   "cursor_px@1": 21.78608512878418,
+   "hand_mm@1": 7.164026260375977,
+   "cursor_px@5": 29.236257553100586,
+   "hand_mm@5": 9.085494995117188,
+   "cursor_px@10": 40.5711669921875,
+   "hand_mm@10": 11.350081443786621,
+   "cursor_px@20": 61.426578521728516,
+   "hand_mm@20": 13.995369911193848
+  },
+  "mlp (seed 0)|hard_test_ood": {
+   "windows": 3550,
+   "mouse_windows": 1666,
+   "cursor_px@1": 5.010489463806152,
+   "hand_mm@1": 1.7889357805252075,
+   "cursor_px@5": 15.471481323242188,
+   "hand_mm@5": 3.7560341358184814,
+   "cursor_px@10": 24.329082489013672,
+   "hand_mm@10": 5.080986499786377,
+   "cursor_px@20": 31.41611099243164,
+   "hand_mm@20": 6.9151740074157715
+  },
+  "mlp (seed 1)|hard_test_ood": {
+   "windows": 3550,
+   "mouse_windows": 1666,
+   "cursor_px@1": 4.962693214416504,
+   "hand_mm@1": 1.7922488451004028,
+   "cursor_px@5": 15.327960014343262,
+   "hand_mm@5": 3.813950538635254,
+   "cursor_px@10": 24.219310760498047,
+   "hand_mm@10": 5.099504470825195,
+   "cursor_px@20": 32.12975311279297,
+   "hand_mm@20": 6.911871910095215
+  },
+  "mlp (seed 2)|hard_test_ood": {
+   "windows": 3550,
+   "mouse_windows": 1666,
+   "cursor_px@1": 5.086497783660889,
+   "hand_mm@1": 1.7948822975158691,
+   "cursor_px@5": 15.182456970214844,
+   "hand_mm@5": 3.8013768196105957,
+   "cursor_px@10": 24.62162208557129,
+   "hand_mm@10": 5.122772693634033,
+   "cursor_px@20": 31.282352447509766,
+   "hand_mm@20": 6.9126296043396
+  }
+ },
+ "meta": {
+  "benchmark": "ComputerXRobot-Bench",
+  "version": "1.1.0",
+  "git_commit": "98a0821ec17ede903fdd4da93b1f20002d9d5eb1",
+  "git_dirty": false,
+  "created": "2026-11-11T02:10:39+00:00",
+  "python": "3.13.7",
+  "mujoco": "3.16.0",
+  "numpy": "2.5.4",
+  "pygame": "2.6.1",
+  "platform": "macOS-15.5-arm64-arm-64bit-Mach-O",
+  "workers": 1
+ }
+}

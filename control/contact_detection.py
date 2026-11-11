@@ -3,7 +3,9 @@
 Key and button presses are read from the spring-loaded slide joints with hysteresis: a
 key goes down when it travels past PRESS_FRACTION of its stroke and comes back up only
 when it returns above RELEASE_FRACTION. This keeps a resting or bouncing finger from
-producing repeated events.
+producing repeated events. In the realistic physics profile (environment/dynamics.py) every
+key has its own actuation point, and a key held past the auto-repeat delay keeps producing
+"key_repeat" events at AUTOREPEAT_RATE, as a real keyboard does.
 
 Contacts are classified so evaluation can count:
   * collisions       robot touching something it should not (desk, monitor, keyboard plate,
@@ -23,6 +25,7 @@ from environment.keyboard_layout import KEYS
 
 PRESS_FRACTION = 0.6
 RELEASE_FRACTION = 0.3
+AUTOREPEAT_RATE = 30.0  # repeated characters per second once auto-repeat starts
 
 ROBOT_ROOT_BODY = "link_yaw"
 FINGER_GEOM = "finger"
@@ -33,7 +36,7 @@ MOUSE_BUTTONS = ("left", "right")  # joints and geoms are named mouse_left / mou
 
 @dataclass(frozen=True)
 class DeviceEvent:
-    kind: str  # "key_down" | "key_up" | "button_down" | "button_up"
+    kind: str  # "key_down" | "key_repeat" | "key_up" | "button_down" | "button_up"
     name: str  # key name (e.g. "a", "enter") or mouse button ("left" / "right")
     char: str | None = None
 
@@ -45,9 +48,9 @@ class DeviceMonitor:
         self.model = model
         key_joints = [model.joint(k.joint) for k in KEYS]
         self.key_qadr = np.array([j.qposadr[0] for j in key_joints])
-        travel = np.array([-model.jnt_range[j.id][0] for j in key_joints])
-        self.key_press_q = -PRESS_FRACTION * travel
-        self.key_release_q = -RELEASE_FRACTION * travel
+        self.key_travel = np.array([-model.jnt_range[j.id][0] for j in key_joints])
+        self.set_key_actuation(None)
+        self.autorepeat_delay = float("inf")  # s; a held key repeats after this (realistic profile)
 
         buttons = [model.joint(f"mouse_{b}") for b in MOUSE_BUTTONS]
         self.button_qadr = np.array([j.qposadr[0] for j in buttons])
@@ -77,9 +80,17 @@ class DeviceMonitor:
             body = self.model.body_parentid[body]
         return False
 
+    def set_key_actuation(self, fractions=None) -> None:
+        """Per-key actuation point as a fraction of travel (None: PRESS_FRACTION for all); the
+        release point keeps the same hysteresis ratio as the nominal keyboard."""
+        frac = np.full(len(KEYS), PRESS_FRACTION) if fractions is None else np.asarray(fractions, float)
+        self.key_press_q = -frac * self.key_travel
+        self.key_release_q = -frac * (RELEASE_FRACTION / PRESS_FRACTION) * self.key_travel
+
     # ---------------------------------------------------------------- state
     def reset(self, data: mujoco.MjData | None = None) -> None:
         self.key_down = np.zeros(len(KEYS), dtype=bool)
+        self._next_repeat = np.full(len(KEYS), np.inf)  # sim time of each held key's next repeat
         self.buttons_down = {b: False for b in MOUSE_BUTTONS}
         self.press_count = 0
         self.click_count = 0
@@ -114,10 +125,17 @@ class DeviceMonitor:
         went_up = self.key_down & (q > self.key_release_q)
         for i in np.flatnonzero(went_down):
             events.append(DeviceEvent("key_down", KEYS[i].name, KEYS[i].char))
+            self._next_repeat[i] = data.time + self.autorepeat_delay
         for i in np.flatnonzero(went_up):
             events.append(DeviceEvent("key_up", KEYS[i].name, KEYS[i].char))
+            self._next_repeat[i] = np.inf
         self.key_down = (self.key_down | went_down) & ~went_up
         self.press_count += int(went_down.sum())
+        # Auto-repeat, like a real keyboard: a key held past the delay keeps typing.
+        for i in np.flatnonzero(self.key_down & (data.time >= self._next_repeat)):
+            events.append(DeviceEvent("key_repeat", KEYS[i].name, KEYS[i].char))
+            self._next_repeat[i] += 1.0 / AUTOREPEAT_RATE
+            self.press_count += 1
 
         qb = data.qpos[self.button_qadr]
         for i, name in enumerate(MOUSE_BUTTONS):

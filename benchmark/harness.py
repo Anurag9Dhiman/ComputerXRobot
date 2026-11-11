@@ -24,16 +24,18 @@ import numpy as np
 
 import environment  # noqa: F401  (MUJOCO_GL / pygame env vars before mujoco is imported)
 from benchmark import BENCHMARK_NAME, BENCHMARK_VERSION
-from benchmark.agents import Agent, agent_class, make_agent
+from benchmark.agents import Agent, agent_class, default_name, make_agent
 from benchmark.metrics import summarize
-from benchmark.suite import EPISODES_PER_TASK, EpisodeSpec, episodes
+from benchmark.suite import EPISODES_PER_TASK, SPLITS, EpisodeSpec, episodes
 from benchmark.tracks import Track, get_track
 from environment.computer_env import ComputerUseEnv
 
 
-def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Track) -> dict:
+def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Track, dynamics=None) -> dict:
+    """One episode. `dynamics` overrides the episode's hidden dynamics (benchmark/ablation.py)."""
     task = spec.make_task()
-    obs = env.reset(task, variation=spec.variation())
+    obs = env.reset(task, variation=spec.variation(),
+                    dynamics=spec.hidden_dynamics() if dynamics is None else dynamics)
     agent.reset(task.instruction, spec.seed)
     total, done = 0.0, False
     while not done:
@@ -56,14 +58,74 @@ def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Tra
 _WORKER: dict = {}
 
 
-def _init_worker(agent_spec: str, track_name: str) -> None:
+def _init_worker(agent_spec: str, track_name: str, physics: str = "nominal") -> None:
     track = get_track(track_name)
-    env = ComputerUseEnv(track.env_config())
+    config = track.env_config()
+    config.physics = physics
+    env = ComputerUseEnv(config)
     _WORKER.update(env=env, agent=make_agent(agent_spec, env), track=track)
 
 
 def _run_spec(spec: dict) -> dict:
     return run_episode(_WORKER["env"], _WORKER["agent"], EpisodeSpec(**spec), _WORKER["track"])
+
+
+# ------------------------------------------------------------ demonstration collection
+_COLLECT: dict = {}
+
+
+def _init_collector(physics: str, student: str | None, images: bool = False) -> None:
+    from environment.computer_env import EnvConfig
+
+    config = (EnvConfig(render_obs=True, obs_image_size=(64, 64), obs_screen_size=(64, 96))
+              if images else EnvConfig(render_obs=False))
+    config.physics = physics
+    env = ComputerUseEnv(config)
+    _COLLECT.update(env=env, student=None)
+    if student:
+        import torch
+
+        from learning.policy import BCPolicy
+
+        torch.set_num_threads(1)
+        _COLLECT["student"] = BCPolicy(student, env.config.max_step, device="cpu")
+
+
+def _collect_specs(specs: list[dict], noise: float = 0.5, seed: int = 0, images: bool = False):
+    from learning.dataset import collect_demonstrations
+
+    specs = [EpisodeSpec(**s) for s in specs]
+    student = _COLLECT["student"]
+    return collect_demonstrations(_COLLECT["env"], [s.make_task() for s in specs], noise=noise, seed=seed,
+                                  with_images=images, verbose=False, keep_failures=student is not None,
+                                  variations=[s.variation() for s in specs],
+                                  dynamics=[s.hidden_dynamics() for s in specs], student=student)
+
+
+def collect(split: str, per_task: int, tasks=None, noise: float = 0.5, seed: int = 0, images: bool = False,
+            student: str | None = None, workers: int = 1):
+    """Demonstrations on a training split (learning/dataset.py).
+
+    Without `student`: the oracle with DART-style perturbations, collected sequentially so that
+    its perturbation stream, and hence the data file, is reproducible.
+    With `student` (a BC checkpoint): DAgger. The student is rolled out, the oracle labels every
+    state it visits and failed episodes are kept. These rollouts are deterministic per episode,
+    so they can be spread over `workers` processes without changing the data.
+    """
+    from learning.dataset import Demonstrations
+
+    if SPLITS[split].content != "train":
+        raise ValueError("demonstrations may only come from training splits (train, hard_train)")
+    if workers > 1 and not student:
+        raise ValueError("workers > 1 applies to DAgger collection (student); oracle collection is sequential")
+    physics = SPLITS[split].physics
+    specs = [s.to_dict() for s in episodes(split, tasks, per_task)]
+    if workers <= 1:
+        _init_collector(physics, student, images)
+        return _collect_specs(specs, noise, seed, images)
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(workers, initializer=_init_collector, initargs=(physics, student, images)) as pool:
+        return Demonstrations.concatenate(pool.map(_collect_specs, [[d] for d in specs], chunksize=1))
 
 
 def _git(*args: str) -> str | None:
@@ -96,10 +158,12 @@ def metadata(workers: int) -> dict:
 
 
 def evaluate(agent_spec: str, split: str, track: str | None = None, tasks=None, per_task: int = EPISODES_PER_TASK,
-             workers: int = 1, out: str | Path | None = None, verbose: bool = True) -> dict:
-    """Evaluate an agent on a split; returns (and optionally writes) the result dict."""
+             workers: int = 1, out: str | Path | None = None, verbose: bool = True, name: str | None = None) -> dict:
+    """Evaluate an agent on a split; returns (and optionally writes) the result dict. `name`
+    groups results in reports (e.g. the seeds of one recipe); default: default_name(agent)."""
     cls, _ = agent_class(agent_spec)
     track_name = track or cls.track
+    physics = SPLITS[split].physics
     specs = episodes(split, tasks, per_task)
     t0 = time.time()
     records: list[dict] = []
@@ -112,12 +176,12 @@ def evaluate(agent_spec: str, split: str, track: str | None = None, tasks=None, 
                   f"{time.time() - t0:6.1f}s", flush=True)
 
     if workers <= 1:
-        _init_worker(agent_spec, track_name)
+        _init_worker(agent_spec, track_name, physics)
         for spec in specs:
             report(_run_spec(spec.to_dict()))
     else:
         ctx = multiprocessing.get_context("spawn")
-        with ctx.Pool(workers, initializer=_init_worker, initargs=(agent_spec, track_name)) as pool:
+        with ctx.Pool(workers, initializer=_init_worker, initargs=(agent_spec, track_name, physics)) as pool:
             for rec in pool.imap_unordered(_run_spec, [s.to_dict() for s in specs], chunksize=1):
                 report(rec)
 
@@ -126,9 +190,10 @@ def evaluate(agent_spec: str, split: str, track: str | None = None, tasks=None, 
         "benchmark": BENCHMARK_NAME,
         "version": BENCHMARK_VERSION,
         "split": split,
+        "physics": physics,
         "track": track_name,
         "agent": agent_spec,
-        "agent_name": cls.name,
+        "agent_name": name or default_name(agent_spec),
         "privileged": bool(cls.privileged),
         "per_task": per_task,
         "summary": summarize(records),

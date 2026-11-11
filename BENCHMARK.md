@@ -1,4 +1,4 @@
-# ComputerXRobot-Bench v1.0
+# ComputerXRobot-Bench v1.1
 
 **Embodied computer use.** A robot arm must operate a computer through its physical devices:
 press keys on a 44-key keyboard and drag and click a two-button mouse. The goal is to complete
@@ -19,23 +19,30 @@ manipulation benchmarks each leave out:
 
 | | |
 |---|---|
-| Version | 1.0.0 (`benchmark/__init__.py`); results are only comparable within a major version |
+| Version | 1.1.0 (`benchmark/__init__.py`). 1.1 adds the hard tier and the dynamics-prediction track; the 1.0 splits and results are unchanged |
 | Tasks | 9 tasks in 4 difficulty levels |
 | Splits | `train`, `val` (model selection), and 4 test splits of 180 episodes (20 per task): `test`, `test_layout`, `test_visual`, `test_dynamics` |
+| Hard tier | realistic physics with **hidden real-world dynamics** inferred from interaction: `hard_train`, `hard_val`, `hard_test`, `hard_test_ood` |
+| Dynamics-prediction track | predict how cursor and hand respond to actions under hidden dynamics (world models) |
 | Tracks | `state` (privileged low-dimensional state) and `vision` (cameras, proprioception, instruction text) |
 | Metric | Bench Score: success averaged over tasks, with a stratified-bootstrap 95% CI |
-| Bounds | scripted oracle (privileged) **100.0** on every split; random **≤ 0.6** on every split |
+| Bounds | scripted oracle (privileged) **100.0** on every split, hard tier included; random **≤ 0.6** on every split |
 | Compute | CPU only; ~2,000 env steps/s per core in the state track, ~70 in the vision track |
 
 ## Contents
 
 1. [Tasks](#tasks)
 2. [Splits and generalisation axes](#splits-and-generalisation-axes)
+   - [Hard tier: hidden real-world dynamics](#hard-tier-hidden-real-world-dynamics)
+   - [Dynamics-prediction track](#dynamics-prediction-track)
 3. [Tracks: what an agent sees](#tracks-what-an-agent-sees)
 4. [Actions and control](#actions-and-control)
 5. [Evaluation protocol](#evaluation-protocol)
 6. [Metrics](#metrics)
 7. [Baselines and results](#baselines-and-results)
+   - [Hard tier](#hard-tier)
+   - [Dynamics ablation](#dynamics-ablation)
+   - [Dynamics-prediction results](#dynamics-prediction-results)
 8. [Reproducing the results](#reproducing-the-results)
 9. [Evaluating your own agent](#evaluating-your-own-agent)
 10. [Validity checks](#validity-checks)
@@ -94,6 +101,82 @@ Episode specs (task, item, scene distribution, seed) are a pure function of the 
 are stable hashes of `(split, task, index)`, so every machine evaluates the same 180
 episodes per split (`python -m benchmark list`).
 
+## Hard tier: hidden real-world dynamics
+
+The standard splits vary the scene, but every episode obeys the same idealised physics. In
+the hard tier the physics itself is realistic and **varies per episode in ways the agent never
+observes**. As with a real robot at a real computer, the agent has to infer how this
+particular world responds, from the consequences of its own actions, within the episode.
+
+| Hidden parameter (`environment/dynamics.py`) | Real-world effect | `real_id` (train, `hard_test`) | `real_ood` (`hard_test_ood`) |
+|---|---|---|---|
+| Control latency | commands take effect late | 0–1 steps (0–20 ms) | 2–4 steps (40–80 ms) |
+| Display latency | the monitor (and the cursor seen on it) lags | 0–2 frames | 3–5 frames |
+| Actuation noise | per-step error on the hand target | 0–0.2 mm | 0.3–0.5 mm |
+| Observation noise | noisy proprioception, positions and cursor | 0–0.3 mm | 0.5–0.8 mm |
+| Gravity compensation | the arm sags under its weight | 95–100% | 85–90% |
+| Pointer acceleration | fast mouse motion moves the cursor further | +0–50% gain per 0.15 m/s | +80–120% |
+| Mouse rotation | the optical sensor reads motion in the mouse's own frame, so a rotated mouse moves the cursor diagonally; dragging can rotate it further | ±8.6° at start | 14–23° at start |
+| Key spring force | switch-to-switch variation, per key | ×0.8–1.4 | ×1.5–1.9 |
+| Key actuation depth | per key, fraction of the 4 mm travel | 50–70% | 75–85% |
+| Keyboard auto-repeat | a key held too long types again at 30 Hz | after 0.45–0.6 s | after 0.25–0.35 s |
+| Double-click time | files open only on a double-click, two clicks within this window and 4 px | 0.4–0.5 s | 0.28–0.33 s |
+
+The realistic profile (`EnvConfig(physics="realistic")`) also changes the scene:
+
+- the mouse rotates on its pad (a hinge with friction);
+- finger-key and finger-button contacts are rigid, like real keycaps;
+- every time limit is 1.5× longer.
+
+Scene variation is the `id` distribution throughout. Nominal physics, i.e. all of v1.0, is
+unchanged bit for bit (`tests/test_hard_dynamics.py`).
+
+The scripted oracle stays a valid upper bound because it may read the hidden parameters:
+
+- it plans from the hand target that commands already in flight will reach;
+- it maps cursor corrections through the mouse's rotation and its current effective gain;
+- it scales its loop gain by the latency, and compensates sag.
+
+It scores 100.0 on `hard_val`, `hard_test` and `hard_test_ood`, and under every condition of
+the dynamics ablation.
+
+A memoryless policy cannot infer any of these parameters. The hard tier therefore separates
+agents that *adapt in context*, from the response to their own recent actions, from agents
+that merely imitate. The baselines are behaviour cloning with and without a short history of
+observations and actions, each also refined with DAgger, and the v1.0 policy applied
+zero-shot.
+
+A single-factor **dynamics ablation** (`python -m benchmark ablate`, `benchmark/ablation.py`)
+attributes failures to individual effects. It replays the `hard_test` episodes and pushes
+exactly one hidden parameter beyond its training range. This is an analysis tool, not a split.
+
+## Dynamics-prediction track
+
+This track scores world models directly on knowing how the world will respond
+(`benchmark/world_model.py`).
+
+- **Given:** 20 control steps (0.4 s) of observations and commanded actions, under an episode's
+  hidden dynamics, plus the next 20 commanded actions.
+- **Predict:** the next 20 observations of the cursor (px) and the hand (mm).
+- **Observations are what an agent sees:** the cursor lags under display latency and
+  everything is noisy, so a model has to infer latency, gain, acceleration, mouse rotation and
+  sag from the context.
+- **Data:** trajectories of the perturbed oracle. Train on `hard_train`; evaluate on
+  `hard_test` (training ranges) and `hard_test_ood` (beyond them).
+- **Metrics:** mean cursor error over windows that start with the hand on the mouse, and mean
+  hand error over all windows, at horizons of 1, 5, 10 and 20 steps (20–400 ms).
+- **Baselines:**
+  - persistence;
+  - a physics-free kinematic prior: instant tracking and a linear unrotated mouse, which is
+    exact if no hidden dynamics existed;
+  - an MLP world model trained on `hard_train`.
+
+```bash
+python -m benchmark.world_model collect     # data/world_model_{train,test,test_ood}.npz
+python -m benchmark.world_model train       # checkpoints/world_model.pt
+python -m benchmark.world_model evaluate --out results/world_model.json
+```
+
 ## Tracks: what an agent sees
 
 | Track | Observations | Purpose |
@@ -150,8 +233,9 @@ agents on the same split.
 
 ## Baselines and results
 
-Three baselines on the official splits. The scripted oracle is reported as a privileged
-reference; it reads the simulator state directly.
+Three baselines on the standard splits; the hard tier adds four learned ones
+([below](#hard-tier)). The scripted oracle is reported as a privileged reference; it reads the
+simulator state directly.
 
 * **random**: uniform random actions (hand moves within ±6 mm per step, finger 0–1).
 * **oracle (privileged)**: the scripted expert (`learning/scripted_policy.py`). It establishes
@@ -160,7 +244,8 @@ reference; it reads the simulator state directly.
   * Inputs: the 70 state features.
   * Outputs: the expert's waypoint offset and finger command.
   * Data: 100 oracle demonstrations per task on `train` (893 kept, 179k samples). DART-style
-    perturbations of the executed motion, 30% strength during key presses and mouse drags.
+    perturbations (Laskey et al., 2017) of the executed motion, 30% strength during key
+    presses and mouse drags.
   * Model: 3×256 MLP, smooth-L1 loss (β = 0.05), AdamW (lr 10⁻³, cosine), batch 512, 80 epochs.
   * Seeds: 3, reported as mean ± std.
 
@@ -263,6 +348,212 @@ all selection was done on `val`.
 6. **The vision track is open.** No learned agent has been evaluated on it yet; it requires
    reading keys and screen and planning without sub-goals.
 
+### Hard tier
+
+Realistic physics with hidden per-episode dynamics. All learned agents use the `bc` recipe
+above, with 3 seeds each.
+
+* **bc-nominal**: the `bc` checkpoints above, trained in nominal physics, applied zero-shot.
+* **bc**: trained on 100 oracle demonstrations per task on `hard_train`, under hidden
+  dynamics (894 of 900 episodes kept, 202k samples). The oracle reads the hidden parameters,
+  so this is imitation of a *privileged* teacher.
+* **bc-history**: as `bc`, with the previous 4 feature vectors and commanded actions as extra
+  inputs (366 inputs). Only a history can reveal latency, gain or rotation.
+* **bc-dagger** and **bc-history-dagger**: `bc` and `bc-history` after two DAgger iterations
+  (Ross et al., 2011).
+  * In each iteration the current student plays 25 `hard_train` episodes per task.
+  * The oracle labels every state the student visits, failed episodes included (51k–293k
+    samples per iteration).
+  * The student is retrained from scratch on all data so far.
+
+Bench Score, mean ± std over 3 seeds (single runs: bootstrap 95% CI half-width):
+
+| Agent | Track | hard_test | hard_test_ood | hard_val |
+|---|---|---|---|---|
+| bc-nominal (zero-shot) | state | 86.9 ± 4.5 | 7.2 ± 0.5 | – |
+| bc | state | 62.0 ± 20.4 | 13.0 ± 1.9 | 65.6 ± 19.9 |
+| bc-history | state | 29.6 ± 4.2 | 4.3 ± 0.9 | 32.8 ± 5.9 |
+| bc-dagger | state | 69.3 ± 22.5 | 15.4 ± 0.9 | 67.8 ± 22.9 |
+| **bc-history-dagger** | state | **98.5 ± 0.9** | **19.4 ± 2.8** | **99.1 ± 0.7** |
+| random | state | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
+| oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
+
+![Hard tier: Bench Score of every learned agent, and the dynamics ablation](docs/hard_results.png)
+
+*Left: hard-tier Bench Score (mean of 3 seeds, error bars = std). Right: the dynamics
+ablation, mean of 3 seeds; the [table below](#dynamics-ablation) gives the values and std. Each
+agent has one colour in both panels.*
+
+#### Success % per task: `hard_test`
+
+| Agent | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
+|---|---|---|---|---|---|---|---|---|---|---|
+| bc-nominal | 100 | 98 | 78 | 100 | 83 | 57 | 100 | 85 | 80 | 86.9 ± 4.5 |
+| bc | 65 | 98 | 78 | 47 | 100 | 97 | 20 | 17 | 37 | 62.0 ± 20.4 |
+| bc-history | 100 | 43 | 5 | 95 | 0 | 12 | 7 | 3 | 2 | 29.6 ± 4.2 |
+| bc-dagger | 62 | 100 | 100 | 55 | 100 | 100 | 32 | 32 | 43 | 69.3 ± 22.5 |
+| bc-history-dagger | 100 | 100 | 100 | 100 | 100 | 98 | 95 | 95 | 98 | 98.5 ± 0.9 |
+| random | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0.6 ± 0.8 |
+| oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+
+#### Success % per task: `hard_test_ood`
+
+| Agent | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
+|---|---|---|---|---|---|---|---|---|---|---|
+| bc-nominal | 30 | 2 | 2 | 30 | 0 | 0 | 2 | 0 | 0 | 7.2 ± 0.5 |
+| bc | 7 | 38 | 22 | 0 | 27 | 23 | 0 | 0 | 0 | 13.0 ± 1.9 |
+| bc-history | 8 | 27 | 0 | 0 | 0 | 3 | 0 | 0 | 0 | 4.3 ± 0.9 |
+| bc-dagger | 12 | 42 | 27 | 0 | 37 | 20 | 2 | 0 | 0 | 15.4 ± 0.9 |
+| bc-history-dagger | 7 | 52 | 53 | 2 | 43 | 18 | 0 | 0 | 0 | 19.4 ± 2.8 |
+| random | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 ± 0.0 |
+| oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+
+#### Errors per episode and mean time to success
+
+| Agent | Split | Wrong keys | Failed clicks | Collisions | Failed contacts | Time to success (s) |
+|---|---|---|---|---|---|---|
+| bc-nominal | `hard_test` | 0.01 | 7.10 | 0.22 | 5.28 | 5.2 |
+| bc-history-dagger | `hard_test` | 2.62 | 0.04 | 0.01 | 4.92 | 6.0 |
+| oracle (privileged) | `hard_test` | 0.00 | 0.00 | 0.00 | 3.05 | 4.6 |
+| bc-nominal | `hard_test_ood` | 1.31 | 1.34 | 69.13 | 5.96 | 7.6 |
+| bc | `hard_test_ood` | 8.04 | 2.39 | 94.31 | 18.54 | 6.8 |
+| bc-dagger | `hard_test_ood` | 6.12 | 1.80 | 125.95 | 10.71 | 8.0 |
+| bc-history | `hard_test_ood` | 4.17 | 0.76 | 12.96 | 7.41 | 7.4 |
+| bc-history-dagger | `hard_test_ood` | 9.40 | 1.21 | 11.37 | 16.41 | 5.5 |
+| oracle (privileged) | `hard_test_ood` | 0.02 | 0.24 | 0.19 | 6.82 | 6.7 |
+
+`python -m benchmark report results/*.json --table errors --split hard_test` lists every agent.
+
+#### Findings
+
+1. **The hard tier separates in-range adaptation from extrapolation.**
+   - In range, the best learned agent reaches 98.5 ± 0.9.
+   - Beyond the training range, every learned agent scores at most 19.4 ± 2.8.
+   - The oracle, which reads the hidden parameters, scores 100 on both.
+   - The out-of-range gap (80 points) is what an agent that infers the dynamics in context,
+     rather than memorising their range, should close.
+2. **Imitating a privileged teacher fails without on-policy data.**
+   - The oracle acts on state the student cannot observe: commands still in flight, the true
+     hand position, the mouse's rotation and gain.
+   - Plain `bc` on `hard_train` (62.0 ± 20.4) scores *below* the nominal policy applied
+     zero-shot (86.9).
+   - It drifts into states the oracle never visits and has no label for them. For example, it
+     settles 5 mm beside a key and never presses it; seed 1 types nothing at all.
+   - Its fit to the training data is the same for all three seeds. The variance comes from
+     closed-loop drift, not from fitting.
+3. **History helps only with DAgger.**
+   - Without DAgger, the 4-step history halves the score (29.6 ± 4.2). The policy copies its
+     own recent actions, the "copycat" problem (de Haan et al., 2019; Wen et al., 2020), and
+     stalls on mouse tasks (`clear_text` 0, `close_window` 5).
+   - DAgger labels exactly those states, and history then becomes decisive: 98.5 ± 0.9 with
+     history against 69.3 ± 22.5 without, and stable across seeds.
+   - Telling how much of the motion is still in flight takes the recent action history.
+4. **A policy trained in idealised physics is robust in range and brittle beyond.**
+   - `bc-nominal` keeps 86.9 in range. Most of its losses come from interaction timing and
+     precise clicking.
+   - It never learned to double-click. It opens files only when repeated clicks happen to
+     fall within the double-click window: `open_file` 57%, with 11.8 clicks per episode
+     against the oracle's 3.7.
+   - On `close_window` it clicks 58 times per episode around the button.
+   - Beyond the range it collapses to 7.2.
+5. **Out of range, success falls off a latency cliff.** Success on `hard_test_ood`, by the
+   episode's control latency (pooled over seeds, 168–192 episodes each):
+
+   | Agent | 40 ms | 60 ms | 80 ms |
+   |---|---|---|---|
+   | bc-nominal | 21.1 | 0.5 | 0.0 |
+   | bc | 32.8 | 4.2 | 1.8 |
+   | bc-dagger | 37.8 | 5.2 | 3.0 |
+   | bc-history-dagger | 40.0 | 15.6 | 1.8 |
+
+   - Training covered at most 20 ms.
+   - The history policy degrades most gracefully, but no policy copes with 80 ms.
+   - Memoryless policies also collide with the desk or keyboard 69–126 times per episode,
+     against 11–13 for the history policies.
+   - The [dynamics ablation](#dynamics-ablation) confirms that latency, not the other
+     effects, causes most of the collapse.
+6. **DAgger also teaches recovery.**
+   - `bc-history-dagger` makes typos in long queries: 8–12 wrong keys per `search` or
+     `open_result` episode, against 0 for the oracle.
+   - It still succeeds in 95% of them, because it corrects each typo with backspace.
+   - That recovery comes from the oracle's labels on the student's own mistakes.
+
+### Dynamics ablation
+
+Which real-world effect breaks which policy? The ablation replays 5 `hard_test` episodes per
+task under 13 conditions:
+
+- **in range:** each episode's own `real_id` dynamics;
+- **one parameter at a time:** pushed to its `real_ood` value, all others in range;
+- **all:** every parameter pushed.
+
+Bench Score is mean ± std over 3 seeds. The oracle scores 100.0 under every condition.
+
+| Condition | bc-nominal | bc-dagger | bc-history-dagger |
+|---|---|---|---|
+| in range | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 |
+| **control latency** (40–80 ms) | **6.7 ± 1.8** | **20.7 ± 2.8** | **31.1 ± 4.8** |
+| display latency (60–100 ms) | 51.1 ± 4.8 | 68.1 ± 22.2 | 96.3 ± 2.1 |
+| actuation noise | 87.4 ± 5.2 | 68.9 ± 23.2 | 99.3 ± 1.0 |
+| observation noise | 86.7 ± 6.5 | 68.1 ± 23.4 | 99.3 ± 1.0 |
+| arm sag | 90.4 ± 1.0 | 65.9 ± 19.2 | 98.5 ± 1.0 |
+| pointer acceleration | 73.3 ± 1.8 | 67.4 ± 21.2 | 97.8 ± 3.1 |
+| mouse rotation | 68.9 ± 12.7 | 64.4 ± 22.0 | 96.3 ± 2.8 |
+| key spring force | 88.9 ± 0.0 | 68.1 ± 22.2 | 97.8 ± 1.8 |
+| key actuation depth | 88.1 ± 1.0 | 68.9 ± 22.0 | 96.3 ± 1.0 |
+| auto-repeat | 86.7 ± 3.1 | 68.1 ± 22.2 | 99.3 ± 1.0 |
+| double-click time | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 |
+| all | 3.0 ± 1.0 | 9.6 ± 2.8 | 20.0 ± 3.1 |
+
+1. **Control latency alone causes most of the collapse.**
+   - Pushing only the latency out of range takes the best policy from 100.0 to 31.1. Pushing
+     every parameter takes it to 20.0.
+   - Every policy here reacts to the state it sees. Under 40–80 ms of latency, it must instead
+     act on the state its commands in flight will produce, and none learned to do so beyond
+     20 ms.
+   - The history policy keeps the most (31.1), consistent with history carrying the commands
+     in flight.
+2. **Visual and mouse dynamics break the policy that never saw them.**
+   - `bc-nominal` loses 36 points to display latency, 18 to mouse rotation and 13 to pointer
+     acceleration.
+   - The policies trained under hidden dynamics lose at most 4 points to any of these.
+   - Training under the in-range dynamics transfers to stronger versions of these effects, but
+     not to stronger latency.
+3. **Noise, sag, key forces and OS timing are absorbed.**
+   - Out of range, actuation and observation noise, arm sag, key spring force and actuation
+     depth, auto-repeat and double-click time each cost at most 4 points.
+   - Some of these effects already cost the zero-shot policy in range (double-click,
+     [finding 4](#findings-1)). The extra strength beyond the training range adds little.
+4. **Effects compound.** "all" is below the worst single effect for every policy: 20.0
+   against 31.1 for `bc-history-dagger`.
+
+### Dynamics-prediction results
+
+Mean error at horizons of 1, 5, 10 and 20 steps (20–400 ms). Lower is better. The MLP is
+trained on `hard_train` trajectories (360 episodes) and reported as mean ± std over 3 seeds.
+`hard_test` has 2,104 windows (263 starting on the mouse); `hard_test_ood` has 3,550 (1,666).
+
+| Model | Split | cursor px @1 | cursor px @5 | cursor px @10 | cursor px @20 | hand mm @1 | hand mm @5 | hand mm @10 | hand mm @20 |
+|---|---|---|---|---|---|---|---|---|---|
+| persistence | `hard_test` | 8.2 | 38.2 | 68.9 | 106.3 | 3.4 | 16.1 | 30.2 | 51.5 |
+| kinematic | `hard_test` | 27.3 | 33.5 | 55.2 | 135.1 | 8.7 | 9.1 | 9.5 | 10.1 |
+| **mlp** (3 seeds) | `hard_test` | **2.7** ± 0.1 | **6.1** ± 0.1 | **9.2** ± 0.1 | **14.3** ± 0.2 | **0.6** ± 0.0 | **1.2** ± 0.0 | **1.6** ± 0.0 | **2.6** ± 0.0 |
+| persistence | `hard_test_ood` | 5.2 | 18.5 | 31.5 | 47.1 | 3.0 | 11.0 | 20.2 | 35.2 |
+| kinematic | `hard_test_ood` | 21.8 | 29.2 | 40.6 | 61.4 | 7.2 | 9.1 | 11.4 | 14.0 |
+| **mlp** (3 seeds) | `hard_test_ood` | **5.0** ± 0.1 | **15.3** ± 0.1 | **24.4** ± 0.2 | **31.6** ± 0.4 | **1.8** ± 0.0 | **3.8** ± 0.0 | **5.1** ± 0.0 | **6.9** ± 0.0 |
+
+- **Within the training ranges, a learned model captures the hidden dynamics well.** It
+  predicts the cursor 400 ms ahead to 14 px, where "nothing moves" is off by 106 px and the
+  physics-free kinematic prior by 135 px. It predicts the hand to 2.6 mm.
+- **Beyond them, it does not extrapolate.**
+  - On `hard_test_ood` the cursor error at 400 ms more than doubles (31.6 px) and the hand
+    error nearly triples (6.9 mm).
+  - At 100 ms the cursor prediction (15.3 px) is barely better than persistence (18.5 px).
+  - Longer latency, stronger acceleration and a more rotated mouse are not inferred from
+    context; they are only fitted inside the training range.
+- **The kinematic prior is the worst cursor predictor at long horizons** (135 px). Ignoring
+  latency, acceleration and rotation is worse than predicting no motion at all.
+
 ## Reproducing the results
 
 ```bash
@@ -288,6 +579,27 @@ Each result file (`results/<agent>_<split>.json`) contains:
   MuJoCo / NumPy / pygame versions, platform, worker count.
 
 Results do not depend on the number of workers (`tests/test_benchmark.py`).
+
+The hard tier, the dynamics ablation and the dynamics-prediction track:
+
+```bash
+sh scripts/run_hard_baselines.sh     # oracle, random, bc, bc-history, bc-nominal; ~55 min
+sh scripts/run_hard_dagger.sh        # bc-dagger, bc-history-dagger; ~70 min
+sh scripts/run_hard_ablation.sh      # dynamics ablation, 10 runs
+python -m benchmark report results/*.json --table hard
+python -m benchmark report results/*.json --table ablation
+python -m benchmark.world_model collect && python -m benchmark.world_model train \
+  && python -m benchmark.world_model evaluate --out results/world_model.json
+```
+
+1. `run_hard_baselines.sh` collects 100 perturbed oracle demonstrations per task on
+   `hard_train` (~4 min). It then trains three seeds each of `bc` and `bc-history` (~40 s each)
+   and evaluates them, the oracle, random and the v1.0 checkpoints on the hard splits (~47 min).
+2. `run_hard_dagger.sh` runs two DAgger iterations from every `bc` and `bc-history`
+   checkpoint, then evaluates the results. In each iteration the student plays 25 `hard_train`
+   episodes per task, the oracle labels every visited state, and the student is retrained on
+   all data so far.
+3. `run_hard_ablation.sh` runs the dynamics ablation for the oracle, `bc-nominal`, `bc-dagger` and `bc-history-dagger`, with 5 `hard_test` episodes per task and condition.
 
 ## Evaluating your own agent
 
@@ -336,6 +648,17 @@ README).
   the screen framebuffer.
 - **Legible:** all 44 key legends, the L/R mouse buttons and the screen text are read back
   from rendered camera images by template matching (`tests/test_legibility.py`).
+- **Hard tier** (`tests/test_hard_dynamics.py`):
+  - Nominal physics is bit-identical to v1.0; the realistic model adds only the mouse joint.
+  - Each hidden effect does what it models: the rotated mouse moves the cursor in its own
+    frame, pointer acceleration, auto-repeat, double-click timing, control latency and
+    display latency.
+  - `real_id` and `real_ood` are disjoint on every parameter (sampled check).
+  - The oracle solves both hard test splits and every ablation condition.
+  - DAgger collection executes the student's actions and keeps the oracle's labels. Parallel
+    collection gives the same data as sequential collection.
+- **Dynamics prediction** (`tests/test_world_model.py`): windows never cross episodes, and the
+  kinematic baseline is exact when the physics is kinematic.
 
 ## Datasheet and limitations
 
@@ -346,13 +669,28 @@ README).
   visual only.
 - **Demonstrations:** `python -m benchmark collect` produces oracle trajectories with features,
   waypoint labels and optionally 64×64 images (`learning/dataset.py`). They contain no human
-  data or personal information.
+  data or personal information. With `--student`, it produces DAgger data: student
+  rollouts labelled by the oracle.
+- **Hidden dynamics are modelled, not measured.** Their ranges are plausible for real
+  hardware (control and display latency of tens of milliseconds, OS pointer acceleration,
+  switch-to-switch spring variation, OS double-click and auto-repeat settings). They are not
+  calibrated to a particular robot or computer.
 - **The `state` track hands over the next sub-goal.** It measures control, not planning or
   perception. The `vision` track has no learned baseline yet and is the open challenge.
 - **Content set sizes:** `close_window` has one test item and `open_result` two. Their test
   episodes differ mainly in scene, which the per-task tables make visible.
 - **Versioning:** any change to tasks, splits, scene ranges or success checks bumps the major
   version.
+
+## References
+
+- P. de Haan, D. Jayaraman, S. Levine. Causal Confusion in Imitation Learning. NeurIPS 2019.
+- M. Laskey, J. Lee, R. Fox, A. Dragan, K. Goldberg. DART: Noise Injection for Robust
+  Imitation Learning. CoRL 2017.
+- S. Ross, G. Gordon, D. Bagnell. A Reduction of Imitation Learning and Structured Prediction
+  to No-Regret Online Learning. AISTATS 2011.
+- C. Wen, J. Lin, T. Darrell, D. Jayaraman, Y. Gao. Fighting Copycat Agents in Behavioral
+  Cloning from Observation Histories. NeurIPS 2020.
 
 ## Citation and licence
 
@@ -363,7 +701,7 @@ Code, assets and benchmark definitions are released under the MIT licence (`LICE
   title        = {ComputerXRobot-Bench: Embodied Computer Use with a Physical Keyboard and Mouse},
   author       = {Dhiman, Anurag},
   year         = {2026},
-  note         = {Version 1.0.0},
+  note         = {Version 1.1.0},
   howpublished = {\url{https://github.com/Anurag9Dhiman/ComputerXRobot}}
 }
 ```

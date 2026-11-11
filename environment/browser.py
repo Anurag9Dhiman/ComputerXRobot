@@ -19,9 +19,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pygame
 
 from environment.web_content import WebPage, search
+
+DOUBLE_CLICK_RADIUS_PX = 4.0  # the two clicks of a double-click must land this close together
 
 SCREEN_W, SCREEN_H = 640, 400
 DOCK_W = 60
@@ -243,6 +246,10 @@ class FileManager(App):
         ("readme.txt", "computer x robot\nbenchmark v1"),
     )
 
+    def reset(self) -> None:
+        self.selected: int | None = None
+        self._last_click: tuple[int, float, tuple[int, int]] | None = None  # (item, time, cursor)
+
     def layout(self, content):
         return {
             f"files:item:{i}": pygame.Rect(content.x + 16, content.y + 44 + i * 40, 300, 32)
@@ -250,16 +257,28 @@ class FileManager(App):
         }
 
     def click(self, widget):
-        if widget and widget.startswith("files:item:"):
-            name, text = self.FILES[int(widget.rsplit(":", 1)[1])]
-            editor = self.desktop.apps["editor"]
-            editor.open_file(name, text)
-            self.desktop.open_app("editor")
+        if not (widget and widget.startswith("files:item:")):
+            self.selected = self._last_click = None
+            return
+        i = int(widget.rsplit(":", 1)[1])
+        window = self.desktop.double_click_time
+        if window is not None:  # a real file manager: one click selects, a double-click opens
+            t, pos = self.desktop.click_time, self.desktop.cursor
+            last = self._last_click
+            if not (last and last[0] == i and t - last[1] <= window
+                    and np.hypot(pos[0] - last[2][0], pos[1] - last[2][1]) <= DOUBLE_CLICK_RADIUS_PX):
+                self.selected, self._last_click = i, (i, t, pos)
+                return
+        self.selected = self._last_click = None
+        name, text = self.FILES[i]
+        self.desktop.apps["editor"].open_file(name, text)
+        self.desktop.open_app("editor")
 
     def draw(self, surf, content):
         _text(surf, "Home / Documents", (content.x + 16, content.y + 14), 21, C_MUTED)
-        for (name, _), rect in zip(self.FILES, self.layout(content).values()):
-            pygame.draw.rect(surf, (232, 236, 243), rect, border_radius=4)
+        for i, ((name, _), rect) in enumerate(zip(self.FILES, self.layout(content).values())):
+            pygame.draw.rect(surf, (205, 222, 250) if i == self.selected else (232, 236, 243), rect,
+                             border_radius=4)
             pygame.draw.rect(surf, (90, 115, 160), (rect.x + 8, rect.y + 7, 14, 18), border_radius=2)
             _text(surf, name, (rect.x + 32, rect.y + 8), 23)
 
@@ -428,6 +447,8 @@ class Desktop:
     def __init__(self, size: tuple[int, int] = (SCREEN_W, SCREEN_H)):
         self.size = size
         self.wallpaper = C_DESKTOP  # set per scene (environment/variation.py); survives reset()
+        self.double_click_time: float | None = None  # realistic profile: files need a double-click
+        self.click_time = 0.0  # simulation time of the click being handled
         self.apps: dict[str, App] = {cls.name: cls(self) for cls in (Browser, TextEditor, FileManager)}
         self._surface = pygame.Surface(self.size)
         self.reset()
@@ -511,8 +532,9 @@ class Desktop:
         self._cursor_f = [float(pos[0]), float(pos[1])]
         self.move_cursor(0, 0)
 
-    def click(self, button: str = "left") -> ClickResult:
+    def click(self, button: str = "left", time: float | None = None) -> ClickResult:
         target = self.widget_at(self.cursor)
+        self.click_time = time if time is not None else 0.0
         self._changed()
         if button == "right":
             self.menu = self._context_menu()
@@ -647,6 +669,7 @@ class Desktop:
             "browser_last_query": browser.last_query,
             "browser_doc": browser.doc.id if browser.doc else None,
             "menu": [wid for wid, _ in self.menu.items] if self.menu else None,
+            "files_selected": self.apps["files"].selected,
         }
 
 

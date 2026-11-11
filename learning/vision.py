@@ -169,13 +169,14 @@ def _to_float(images: torch.Tensor) -> torch.Tensor:
     return images.permute(0, 3, 1, 2).float() / 255.0
 
 
-def augment(images: torch.Tensor, gen: torch.Generator) -> torch.Tensor:
-    """Random shift (replicate-padded crop) and brightness / contrast jitter, per sample."""
+def augment(images: torch.Tensor, gen: torch.Generator, shift: int = SHIFT) -> torch.Tensor:
+    """Random shift of up to `shift` px (replicate-padded crop) and brightness / contrast jitter,
+    per sample."""
     b, _, h, w = images.shape
     dev = images.device
-    padded = nn.functional.pad(images, (SHIFT, SHIFT, SHIFT, SHIFT), mode="replicate")
-    dx = torch.randint(0, 2 * SHIFT + 1, (b,), generator=gen).to(dev)
-    dy = torch.randint(0, 2 * SHIFT + 1, (b,), generator=gen).to(dev)
+    padded = nn.functional.pad(images, (shift, shift, shift, shift), mode="replicate")
+    dx = torch.randint(0, 2 * shift + 1, (b,), generator=gen).to(dev)
+    dy = torch.randint(0, 2 * shift + 1, (b,), generator=gen).to(dev)
     rows = (dy[:, None] + torch.arange(h, device=dev)[None])[:, :, None].expand(b, h, w)
     cols = (dx[:, None] + torch.arange(w, device=dev)[None])[:, None, :].expand(b, h, w)
     idx = torch.arange(b, device=dev)[:, None, None].expand(b, h, w)
@@ -189,7 +190,7 @@ def augment(images: torch.Tensor, gen: torch.Generator) -> torch.Tensor:
 # ------------------------------------------------------------------ training
 def train_vision_bc(demos: Demonstrations, out_path: str | Path, use_subgoal: bool = False, epochs: int = 40,
                     batch_size: int = 128, lr: float = 3e-4, seed: int = 0, device: str = "auto",
-                    val_fraction: float = 0.05, verbose: bool = True) -> dict:
+                    val_fraction: float = 0.05, verbose: bool = True, shift: int = SHIFT) -> dict:
     missing = [k for k in (*CAMERAS, "proprio", "instruction", "subgoal") if k not in demos.images]
     if missing:
         raise ValueError(f"demonstrations lack {missing}; collect them with --vision")
@@ -222,7 +223,7 @@ def train_vision_bc(demos: Demonstrations, out_path: str | Path, use_subgoal: bo
         for cam in CAMERAS:
             batch[cam] = _to_float(batch[cam])
             if train:
-                batch[cam] = augment(batch[cam], gen)
+                batch[cam] = augment(batch[cam], gen, shift)
         err = nn.functional.smooth_l1_loss(net(batch), targets[i].to(dev), reduction="none", beta=0.05)
         return (err * weights).mean()
 
@@ -252,7 +253,7 @@ def train_vision_bc(demos: Demonstrations, out_path: str | Path, use_subgoal: bo
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"kind": "vision_bc", "state_dict": net.state_dict(), "use_subgoal": use_subgoal,
                 "cameras": CAMERAS, "history": history, "num_samples": len(demos), "seed": seed,
-                "epochs": epochs, "task_specs": demos.task_specs}, out_path)
+                "epochs": epochs, "shift": shift, "task_specs": demos.task_specs}, out_path)
     if verbose:
         print(f"saved {out_path} ({len(train_idx)} train / {len(val_idx)} val samples)")
     return history
@@ -301,10 +302,12 @@ def main(argv=None) -> int:
     t.add_argument("--lr", type=float, default=3e-4)
     t.add_argument("--seed", type=int, default=0)
     t.add_argument("--device", default="auto")
+    t.add_argument("--shift", type=int, default=SHIFT, help="max random image shift in px (augmentation)")
     args = p.parse_args(argv)
     demos = Demonstrations.concatenate([Demonstrations.load(d) for d in args.data])
     print(f"{len(demos)} samples from {len(demos.task_specs)} episodes")
-    train_vision_bc(demos, args.out, args.subgoal, args.epochs, args.batch_size, args.lr, args.seed, args.device)
+    train_vision_bc(demos, args.out, args.subgoal, args.epochs, args.batch_size, args.lr, args.seed, args.device,
+                    shift=args.shift)
     return 0
 
 

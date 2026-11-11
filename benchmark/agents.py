@@ -84,6 +84,9 @@ class BCAgent(Agent):
         self.policy = BCPolicy(checkpoint, env.config.max_step, device="cpu")
         self.checkpoint = checkpoint
 
+    def reset(self, instruction, seed):
+        self.policy.reset()
+
     def act(self, obs):
         return self.policy.act(obs)
 
@@ -103,6 +106,19 @@ def agent_class(spec: str):
         module, cls = spec.split(":", 1)
         return getattr(importlib.import_module(module), cls), {}
     raise ValueError(f"unknown agent {spec!r}: use random, oracle, bc:<checkpoint> or <module>:<Class>")
+
+
+def default_name(spec: str) -> str:
+    """Name under which results are grouped: the class name, or "bc-history" for a
+    history-conditioned behaviour-cloning checkpoint."""
+    cls, kwargs = agent_class(spec)
+    if cls is BCAgent:
+        import torch
+
+        ckpt = torch.load(kwargs["checkpoint"], map_location="cpu", weights_only=False)
+        if ckpt.get("history_steps", 0):
+            return "bc-history"
+    return cls.name
 
 
 def make_agent(spec: str, env: ComputerUseEnv) -> Agent:

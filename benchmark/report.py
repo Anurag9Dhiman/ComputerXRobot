@@ -13,10 +13,10 @@ from pathlib import Path
 
 import numpy as np
 
-from benchmark.suite import SPLITS, TASK_ORDER, TEST_SPLITS
+from benchmark.suite import HARD_TEST_SPLITS, SPLITS, TASK_ORDER, TEST_SPLITS
 from environment.task_manager import TASKS
 
-TABLES = ("splits", "tasks", "levels", "errors")
+TABLES = ("splits", "hard", "tasks", "levels", "errors")
 
 
 def load(paths) -> list[dict]:
@@ -59,17 +59,20 @@ def _render(header: list[str], rows: list[list[str]], fmt: str, caption: str) ->
     return "\n".join(lines)
 
 
-def splits_table(results: list[dict], fmt: str = "md") -> str:
-    splits = [s for s in (*TEST_SPLITS, "val", "train") if any(r["split"] == s for r in results)]
+def splits_table(results: list[dict], fmt: str = "md", hard: bool = False) -> str:
+    candidates = (*HARD_TEST_SPLITS, "hard_val") if hard else (*TEST_SPLITS, "val", "train")
+    splits = [s for s in candidates if any(r["split"] == s for r in results)]
     rows = []
     for (label, track), by_split in _group(results).items():
+        if not any(by_split.get(s) for s in splits):
+            continue
         row = [label, track]
         for s in splits:
             rs = by_split.get(s, [])
             row.append(_cell([r["summary"]["score"] for r in rs], [tuple(r["summary"]["score_ci"]) for r in rs], fmt))
         rows.append(row)
-    return _render(["Agent", "Track", *splits], rows, fmt,
-                   "Bench Score (success % averaged over tasks) per split")
+    title = "Hard tier (realistic physics, hidden dynamics)" if hard else "Bench Score"
+    return _render(["Agent", "Track", *splits], rows, fmt, f"{title}: success % averaged over tasks, per split")
 
 
 def tasks_table(results: list[dict], split: str = "test", fmt: str = "md") -> str:
@@ -121,8 +124,8 @@ def errors_table(results: list[dict], split: str = "test", fmt: str = "md") -> s
 
 
 def report(results: list[dict], table: str = "splits", split: str = "test", fmt: str = "md") -> str:
-    if table == "splits":
-        return splits_table(results, fmt)
+    if table in ("splits", "hard"):
+        return splits_table(results, fmt, hard=table == "hard")
     if split not in SPLITS:
         raise ValueError(f"unknown split {split!r}")
     return {"tasks": tasks_table, "levels": levels_table, "errors": errors_table}[table](results, split, fmt)

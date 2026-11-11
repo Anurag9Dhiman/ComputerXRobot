@@ -17,7 +17,7 @@ from pathlib import Path
 
 import environment  # noqa: F401  (MUJOCO_GL / pygame env vars)
 from benchmark import BENCHMARK_NAME, BENCHMARK_VERSION
-from benchmark.suite import EPISODES_PER_TASK, SPLITS, TASK_ORDER, TEST_SPLITS
+from benchmark.suite import EPISODES_PER_TASK, HARD_TEST_SPLITS, SPLITS, TASK_ORDER, TEST_SPLITS
 from benchmark.tracks import TRACKS
 from environment.task_manager import SPLITS as CONTENT_SPLITS
 from environment.task_manager import TASKS, make_task
@@ -34,7 +34,8 @@ def cmd_list(args) -> int:
               f"test {len(content['test']):2d} items   e.g. {example.instruction}")
     print("\nSplits")
     for name, spec in SPLITS.items():
-        print(f"  {name:14s} content={spec.content:5s} scene={spec.scene:12s} {spec.description}")
+        print(f"  {name:14s} content={spec.content:5s} scene={spec.scene:12s} dynamics={spec.dynamics:8s} "
+              f"{spec.description}")
     print(f"  ({EPISODES_PER_TASK} episodes per task per split -> {EPISODES_PER_TASK * len(TASKS)} per split)")
     print("\nTracks")
     for name, track in TRACKS.items():
@@ -46,15 +47,15 @@ def cmd_list(args) -> int:
 def cmd_run(args) -> int:
     from benchmark.harness import evaluate
 
-    splits = (list(TEST_SPLITS) if args.all_test else []) + [s for s in args.split or [] if s not in TEST_SPLITS
-                                                              or not args.all_test]
+    groups = (list(TEST_SPLITS) if args.all_test else []) + (list(HARD_TEST_SPLITS) if args.all_hard else [])
+    splits = groups + [s for s in args.split or [] if s not in groups]
     splits = splits or ["test"]
     for split in splits:
         tag = args.tag or re.sub(r"[^A-Za-z0-9_.-]+", "_", args.agent.split("/")[-1])
         out = Path(args.out_dir) / f"{tag}_{split}.json"
         print(f"{args.agent} on {split} ({args.per_task} episodes per task, {args.workers} workers)")
         result = evaluate(args.agent, split, track=args.track, tasks=args.tasks, per_task=args.per_task,
-                          workers=args.workers, out=out)
+                          workers=args.workers, out=out, name=args.name)
         s = result["summary"]
         lo, hi = s["score_ci"]
         print(f"  Bench Score {100 * s['score']:.1f} (95% CI {100 * lo:.1f}-{100 * hi:.1f})   "
@@ -67,14 +68,20 @@ def cmd_collect(args) -> int:
     from environment.computer_env import ComputerUseEnv, EnvConfig
     from learning.dataset import collect_demonstrations
 
-    specs = episodes("train", args.tasks, args.per_task)
-    env = ComputerUseEnv(EnvConfig(render_obs=args.images, obs_image_size=(64, 64), obs_screen_size=(64, 96))
-                         if args.images else EnvConfig(render_obs=False))
+    if SPLITS[args.split].content != "train":
+        sys.exit("demonstrations may only come from training splits (train, hard_train)")
+    specs = episodes(args.split, args.tasks, args.per_task)
+    config = (EnvConfig(render_obs=True, obs_image_size=(64, 64), obs_screen_size=(64, 96))
+              if args.images else EnvConfig(render_obs=False))
+    config.physics = SPLITS[args.split].physics
+    env = ComputerUseEnv(config)
     t0 = time.time()
-    print(f"Collecting {len(specs)} oracle demonstrations on the train split (id scenes, noise {args.noise})")
+    print(f"Collecting {len(specs)} oracle demonstrations on {args.split} ({config.physics} physics, "
+          f"noise {args.noise})")
     demos = collect_demonstrations(env, [s.make_task() for s in specs], noise=args.noise, seed=args.seed,
                                    with_images=args.images, verbose=False,
-                                   variations=[s.variation() for s in specs])
+                                   variations=[s.variation() for s in specs],
+                                   dynamics=[s.hidden_dynamics() for s in specs])
     demos.save(args.out)
     print(f"saved {len(demos)} samples from {len(demos.task_specs)}/{len(specs)} episodes to {args.out} "
           f"in {time.time() - t0:.0f}s")
@@ -101,16 +108,19 @@ def main(argv=None) -> int:
     p.add_argument("--agent", required=True, help="random | oracle | bc:<checkpoint> | <module>:<Class>")
     p.add_argument("--split", action="append", choices=list(SPLITS), help="repeatable (default: test)")
     p.add_argument("--all-test", action="store_true", help="all four test splits (plus any --split)")
+    p.add_argument("--all-hard", action="store_true", help="hard_test and hard_test_ood (plus any --split)")
     p.add_argument("--track", choices=list(TRACKS), help="default: the agent's own track")
     p.add_argument("--tasks", nargs="+", choices=TASK_ORDER, help="subset of tasks (not a benchmark result)")
     p.add_argument("--per-task", type=int, default=EPISODES_PER_TASK,
                    help=f"episodes per task (official: {EPISODES_PER_TASK})")
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--tag", help="name for the result files (default: from the agent spec)")
+    p.add_argument("--name", help="agent name in result tables; runs with the same name are grouped as seeds")
     p.add_argument("--out-dir", default="results")
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("collect", help="oracle demonstrations on the train split (for imitation learning)")
+    p = sub.add_parser("collect", help="oracle demonstrations on a training split (for imitation learning)")
+    p.add_argument("--split", default="train", choices=[s for s, v in SPLITS.items() if v.content == "train"])
     p.add_argument("--per-task", type=int, default=40)
     p.add_argument("--tasks", nargs="+", choices=TASK_ORDER)
     p.add_argument("--noise", type=float, default=0.5, help="perturbation size (fraction of max step)")
@@ -121,7 +131,7 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("report", help="Markdown / LaTeX tables from result files")
     p.add_argument("results", nargs="+")
-    p.add_argument("--table", choices=("splits", "tasks", "levels", "errors"), default="splits")
+    p.add_argument("--table", choices=("splits", "hard", "tasks", "levels", "errors"), default="splits")
     p.add_argument("--split", default="test", help="split for the tasks / levels / errors tables")
     p.add_argument("--format", choices=("md", "latex"), default="md")
     p.add_argument("--out")

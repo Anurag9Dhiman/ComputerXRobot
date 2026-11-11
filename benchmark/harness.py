@@ -24,16 +24,16 @@ import numpy as np
 
 import environment  # noqa: F401  (MUJOCO_GL / pygame env vars before mujoco is imported)
 from benchmark import BENCHMARK_NAME, BENCHMARK_VERSION
-from benchmark.agents import Agent, agent_class, make_agent
+from benchmark.agents import Agent, agent_class, default_name, make_agent
 from benchmark.metrics import summarize
-from benchmark.suite import EPISODES_PER_TASK, EpisodeSpec, episodes
+from benchmark.suite import EPISODES_PER_TASK, SPLITS, EpisodeSpec, episodes
 from benchmark.tracks import Track, get_track
 from environment.computer_env import ComputerUseEnv
 
 
 def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Track) -> dict:
     task = spec.make_task()
-    obs = env.reset(task, variation=spec.variation())
+    obs = env.reset(task, variation=spec.variation(), dynamics=spec.hidden_dynamics())
     agent.reset(task.instruction, spec.seed)
     total, done = 0.0, False
     while not done:
@@ -56,9 +56,11 @@ def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Tra
 _WORKER: dict = {}
 
 
-def _init_worker(agent_spec: str, track_name: str) -> None:
+def _init_worker(agent_spec: str, track_name: str, physics: str = "nominal") -> None:
     track = get_track(track_name)
-    env = ComputerUseEnv(track.env_config())
+    config = track.env_config()
+    config.physics = physics
+    env = ComputerUseEnv(config)
     _WORKER.update(env=env, agent=make_agent(agent_spec, env), track=track)
 
 
@@ -96,10 +98,12 @@ def metadata(workers: int) -> dict:
 
 
 def evaluate(agent_spec: str, split: str, track: str | None = None, tasks=None, per_task: int = EPISODES_PER_TASK,
-             workers: int = 1, out: str | Path | None = None, verbose: bool = True) -> dict:
-    """Evaluate an agent on a split; returns (and optionally writes) the result dict."""
+             workers: int = 1, out: str | Path | None = None, verbose: bool = True, name: str | None = None) -> dict:
+    """Evaluate an agent on a split; returns (and optionally writes) the result dict. `name`
+    groups results in reports (e.g. the seeds of one recipe); default: default_name(agent)."""
     cls, _ = agent_class(agent_spec)
     track_name = track or cls.track
+    physics = SPLITS[split].physics
     specs = episodes(split, tasks, per_task)
     t0 = time.time()
     records: list[dict] = []
@@ -112,12 +116,12 @@ def evaluate(agent_spec: str, split: str, track: str | None = None, tasks=None, 
                   f"{time.time() - t0:6.1f}s", flush=True)
 
     if workers <= 1:
-        _init_worker(agent_spec, track_name)
+        _init_worker(agent_spec, track_name, physics)
         for spec in specs:
             report(_run_spec(spec.to_dict()))
     else:
         ctx = multiprocessing.get_context("spawn")
-        with ctx.Pool(workers, initializer=_init_worker, initargs=(agent_spec, track_name)) as pool:
+        with ctx.Pool(workers, initializer=_init_worker, initargs=(agent_spec, track_name, physics)) as pool:
             for rec in pool.imap_unordered(_run_spec, [s.to_dict() for s in specs], chunksize=1):
                 report(rec)
 
@@ -126,9 +130,10 @@ def evaluate(agent_spec: str, split: str, track: str | None = None, tasks=None, 
         "benchmark": BENCHMARK_NAME,
         "version": BENCHMARK_VERSION,
         "split": split,
+        "physics": physics,
         "track": track_name,
         "agent": agent_spec,
-        "agent_name": cls.name,
+        "agent_name": name or default_name(agent_spec),
         "privileged": bool(cls.privileged),
         "per_task": per_task,
         "summary": summarize(records),

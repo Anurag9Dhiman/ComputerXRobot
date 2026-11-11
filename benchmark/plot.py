@@ -149,21 +149,20 @@ def plot_hard(results: list[dict], out: str) -> None:
     ax.set_title(f"Hard tier: Bench Score, mean ± std over 3 seeds{note}", fontsize=10.5, loc="left")
     ax.grid(axis="y", color=GRID, lw=0.8, zorder=0)
 
+    # Dot plot of seed means, one sub-row per agent so dots never overlap. Values and seed std
+    # are in the ablation table (`report --table ablation`), which keeps the panel uncluttered.
     rows = np.arange(len(CONDITIONS))
     abl_agents = [a for a in agents if any(r["agent_name"] == a for r in ablations)]
-    offset = 0.36 / max(len(abl_agents), 1)
+    offset = 0.6 / max(len(abl_agents), 1)
     for i, a in enumerate(abl_agents):
         runs = [r for r in ablations if r["agent_name"] == a]
         m = np.array([np.mean([100 * r["conditions"][c]["score"] for r in runs]) for c in CONDITIONS])
-        sd = np.array([np.std([100 * r["conditions"][c]["score"] for r in runs]) for c in CONDITIONS])
         y = rows + (i - (len(abl_agents) - 1) / 2) * offset
-        bx.errorbar(m, y, xerr=sd, fmt="none", ecolor=color[a], elinewidth=1, alpha=0.7, zorder=3)
-        bx.scatter(m, y, s=46, color=color[a], edgecolors=SURFACE, linewidths=1.5, zorder=4)
-        for xv, yv in zip(m, y):
-            bx.text(min(xv + 2.5, 104), yv, f"{xv:.0f}", va="center", ha="left", fontsize=7.5, color=INK_2)
+        bx.hlines(y, 0, m, color=GRID, lw=0.8, zorder=2)
+        bx.scatter(m, y, s=40, color=color[a], edgecolors=SURFACE, linewidths=1.2, zorder=4)
     bx.set_yticks(rows, CONDITIONS)
     bx.invert_yaxis()
-    bx.set_xlim(0, 110)
+    bx.set_xlim(0, 104)
     bx.set_xlabel("Bench Score (%)")
     bx.axhline(0.5, color=GRID, lw=0.8)
     bx.axhline(len(CONDITIONS) - 1.5, color=GRID, lw=0.8)

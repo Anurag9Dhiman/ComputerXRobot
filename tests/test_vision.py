@@ -40,6 +40,21 @@ def test_inputs_use_only_the_vision_track(vision_obs):
     assert encode_instruction(seen["instruction"])[0] == ord(seen["instruction"][0]) - 31
 
 
+def test_collector_records_vision_inputs_every_second_step():
+    from learning.dataset import collect_demonstrations
+
+    env = ComputerUseEnv(get_track("vision").env_config())
+    spec = episodes("train", tasks=["type_key"], per_task=1)[0]
+    kw = dict(noise=0.5, seed=0, verbose=False, variations=[spec.variation()])
+    every = collect_demonstrations(env, [spec.make_task()], **kw)
+    half = collect_demonstrations(env, [spec.make_task()], observe=vision_inputs, record_every=2, **kw)
+    env.close()
+    # Same rollout (same perturbations), every second step recorded, dtypes kept.
+    assert np.array_equal(half.targets, every.targets[::2]) and np.array_equal(half.actions, every.actions[::2])
+    assert half.images["keyboard_cam"].dtype == np.uint8 and half.images["proprio"].dtype == np.float32
+    assert len(half.images["instruction"]) == len(half) and half.images["subgoal"][:, :-4].any()
+
+
 def test_subgoal_track_adds_only_the_subgoal():
     vision, diag = get_track("vision"), get_track("vision_subgoal")
     assert set(diag.keys) - set(vision.keys) == {"expected_char", "click_target", "click_button", "click_target_px"}

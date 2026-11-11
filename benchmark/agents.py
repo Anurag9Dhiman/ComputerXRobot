@@ -14,6 +14,11 @@ Agents are named by a spec string:
     random                  uniform random actions (lower bound)
     oracle                  scripted expert with privileged simulator access (upper bound;
                             reported separately, not a track entry)
+    adaptive                the same expert without privileged access: it identifies the
+                            hidden dynamics online from state-track observations and its own
+                            commands (learning/adaptive.py)
+    fixed                   the same, assuming nominal dynamics instead of identifying them
+                            (control for what identification contributes)
     bc:<checkpoint.pt>      behaviour cloning policy (learning/policy.py), state track
     <module>:<Class>        your own agent class; constructed as Class(env) and must define
                             `name` and `track` class attributes
@@ -73,6 +78,33 @@ class OracleAgent(Agent):
         return self.policy.act()
 
 
+class AdaptiveAgent(Agent):
+    name = "adaptive-expert"
+    track = "state"
+
+    def __init__(self, env):
+        super().__init__(env)
+        from learning.adaptive import AdaptiveExpert
+
+        self.policy = AdaptiveExpert(env.config)  # public configuration only, never env state
+
+    def reset(self, instruction, seed):
+        self.policy.reset()
+
+    def act(self, obs):
+        return self.policy.act(obs)
+
+
+class FixedAgent(AdaptiveAgent):
+    name = "fixed-expert"
+
+    def __init__(self, env):
+        Agent.__init__(self, env)
+        from learning.adaptive import AdaptiveExpert
+
+        self.policy = AdaptiveExpert(env.config, identify=False)
+
+
 class BCAgent(Agent):
     name = "bc"
     track = "state"
@@ -97,6 +129,10 @@ def agent_class(spec: str):
         return RandomAgent, {}
     if spec == "oracle":
         return OracleAgent, {}
+    if spec == "adaptive":
+        return AdaptiveAgent, {}
+    if spec == "fixed":
+        return FixedAgent, {}
     if spec.startswith("bc:"):
         checkpoint = spec[3:]
         if not Path(checkpoint).exists():
@@ -105,7 +141,7 @@ def agent_class(spec: str):
     if ":" in spec:
         module, cls = spec.split(":", 1)
         return getattr(importlib.import_module(module), cls), {}
-    raise ValueError(f"unknown agent {spec!r}: use random, oracle, bc:<checkpoint> or <module>:<Class>")
+    raise ValueError(f"unknown agent {spec!r}: use random, oracle, adaptive, fixed, bc:<checkpoint> or <module>:<Class>")
 
 
 def default_name(spec: str) -> str:

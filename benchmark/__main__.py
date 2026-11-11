@@ -17,6 +17,7 @@ from pathlib import Path
 
 import environment  # noqa: F401  (MUJOCO_GL / pygame env vars)
 from benchmark import BENCHMARK_NAME, BENCHMARK_VERSION
+from benchmark.report import TABLES
 from benchmark.suite import EPISODES_PER_TASK, HARD_TEST_SPLITS, SPLITS, TASK_ORDER, TEST_SPLITS
 from benchmark.tracks import TRACKS
 from environment.task_manager import SPLITS as CONTENT_SPLITS
@@ -82,6 +83,16 @@ def cmd_collect(args) -> int:
     return 0
 
 
+def cmd_ablate(args) -> int:
+    from benchmark.ablation import ablate
+
+    tag = args.tag or re.sub(r"[^A-Za-z0-9_.-]+", "_", args.agent.split("/")[-1])
+    out = Path(args.out_dir) / f"ablation_{tag}.json"
+    print(f"{args.agent}: dynamics ablation on hard_test ({args.per_task} episodes per task, {args.workers} workers)")
+    ablate(args.agent, per_task=args.per_task, workers=args.workers, out=out, name=args.name)
+    return 0
+
+
 def cmd_report(args) -> int:
     from benchmark.report import load, report
 
@@ -127,9 +138,18 @@ def main(argv=None) -> int:
     p.add_argument("--out", default="data/train.npz")
     p.set_defaults(func=cmd_collect)
 
+    p = sub.add_parser("ablate", help="single-factor dynamics ablation on hard_test (benchmark/ablation.py)")
+    p.add_argument("--agent", required=True)
+    p.add_argument("--per-task", type=int, default=10)
+    p.add_argument("--workers", type=int, default=1)
+    p.add_argument("--name", help="agent name in the ablation table; runs with the same name are grouped")
+    p.add_argument("--tag", help="output file tag (default: from the agent spec)")
+    p.add_argument("--out-dir", default="results")
+    p.set_defaults(func=cmd_ablate)
+
     p = sub.add_parser("report", help="Markdown / LaTeX tables from result files")
     p.add_argument("results", nargs="+")
-    p.add_argument("--table", choices=("splits", "hard", "tasks", "levels", "errors"), default="splits")
+    p.add_argument("--table", choices=TABLES, default="splits")
     p.add_argument("--split", default="test", help="split for the tasks / levels / errors tables")
     p.add_argument("--format", choices=("md", "latex"), default="md")
     p.add_argument("--out")

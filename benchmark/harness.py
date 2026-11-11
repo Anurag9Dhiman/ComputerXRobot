@@ -31,9 +31,11 @@ from benchmark.tracks import Track, get_track
 from environment.computer_env import ComputerUseEnv
 
 
-def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Track) -> dict:
+def run_episode(env: ComputerUseEnv, agent: Agent, spec: EpisodeSpec, track: Track, dynamics=None) -> dict:
+    """One episode. `dynamics` overrides the episode's hidden dynamics (benchmark/ablation.py)."""
     task = spec.make_task()
-    obs = env.reset(task, variation=spec.variation(), dynamics=spec.hidden_dynamics())
+    obs = env.reset(task, variation=spec.variation(),
+                    dynamics=spec.hidden_dynamics() if dynamics is None else dynamics)
     agent.reset(task.instruction, spec.seed)
     total, done = 0.0, False
     while not done:

@@ -16,14 +16,38 @@ import numpy as np
 from benchmark.suite import HARD_TEST_SPLITS, SPLITS, TASK_ORDER, TEST_SPLITS
 from environment.task_manager import TASKS
 
-TABLES = ("splits", "hard", "tasks", "levels", "errors")
+TABLES = ("splits", "hard", "tasks", "levels", "errors", "ablation")
 
 
 def load(paths) -> list[dict]:
-    """Episode-result files among `paths`; others, such as the dynamics-prediction track's
-    results/world_model.json, are skipped so that `results/*.json` works."""
+    """Evaluation and ablation results among `paths`; other files, such as the
+    dynamics-prediction track's results/world_model.json, are skipped so that `results/*.json`
+    works."""
     results = [json.loads(Path(p).read_text()) for p in paths]
-    return [r for r in results if "per_task" in r]
+    return [r for r in results if "per_task" in r or r.get("analysis") == "dynamics_ablation"]
+
+
+def ablation_table(results: list[dict], fmt: str = "md") -> str:
+    """Single-factor dynamics ablation (benchmark/ablation.py): one row per condition, one
+    column per agent (mean ± std over runs with the same name)."""
+    from benchmark.ablation import CONDITIONS
+
+    by_agent: dict[str, list[dict]] = defaultdict(list)
+    for r in results:
+        by_agent[_label(r)].append(r)
+    agents = sorted(by_agent, key=lambda a: ("privileged" in a, a))
+    rows = []
+    for c in CONDITIONS:
+        row = [c]
+        for a in agents:
+            rs = [r for r in by_agent[a] if c in r["conditions"]]
+            row.append(_cell([r["conditions"][c]["score"] for r in rs],
+                             [tuple(r["conditions"][c]["score_ci"]) for r in rs], fmt))
+        rows.append(row)
+    n = {r["episodes_per_task"] for r in results}
+    return _render(["Condition", *agents], rows, fmt,
+                   f"Dynamics ablation on hard_test ({'/'.join(map(str, sorted(n)))} episodes per task): "
+                   "one hidden parameter pushed beyond its training range")
 
 
 def _label(r: dict) -> str:
@@ -127,6 +151,10 @@ def errors_table(results: list[dict], split: str = "test", fmt: str = "md") -> s
 
 
 def report(results: list[dict], table: str = "splits", split: str = "test", fmt: str = "md") -> str:
+    ablations = [r for r in results if r.get("analysis") == "dynamics_ablation"]
+    if table == "ablation":
+        return ablation_table(ablations, fmt)
+    results = [r for r in results if r.get("analysis") != "dynamics_ablation"]
     if table in ("splits", "hard"):
         return splits_table(results, fmt, hard=table == "hard")
     if split not in SPLITS:

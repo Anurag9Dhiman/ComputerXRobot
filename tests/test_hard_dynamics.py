@@ -142,6 +142,26 @@ def test_dagger_executes_the_student_and_keeps_oracle_labels(real_env):
     assert np.linalg.norm(demos.targets[-1, :3]) > 1.0  # ... and the oracle still points to the key (cm)
 
 
+def test_dynamics_ablation_changes_exactly_one_factor(real_env):
+    from benchmark.ablation import ALL_FIELDS, CONDITIONS, FACTORS, condition_dynamics
+
+    spec = episodes("hard_test", per_task=1)[0]
+    base = spec.hidden_dynamics()
+    assert condition_dynamics(spec, "in range") == base
+    for condition, fields in FACTORS.items():
+        d = condition_dynamics(spec, condition)
+        changed = {f for f in ALL_FIELDS if getattr(d, f) != getattr(base, f)}
+        assert changed == set(fields), condition
+    assert {f for f in ALL_FIELDS if getattr(condition_dynamics(spec, "all"), f) != getattr(base, f)} == set(ALL_FIELDS)
+    # the oracle reads the hidden parameters, so it still solves every condition
+    agent = make_agent("oracle", real_env)
+    for condition in ("control latency", "mouse rotation", "double-click time", "all"):
+        for spec in episodes("hard_test", tasks=["open_file"], per_task=1):
+            rec = run_episode(real_env, agent, spec, get_track("state"), dynamics=condition_dynamics(spec, condition))
+            assert rec["success"], condition
+    assert len(CONDITIONS) == len(FACTORS) + 2
+
+
 @pytest.mark.parametrize("split", HARD_TEST_SPLITS)
 def test_oracle_solves_every_task_under_hidden_dynamics(real_env, split):
     agent = make_agent("oracle", real_env)

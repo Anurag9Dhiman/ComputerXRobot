@@ -26,7 +26,7 @@ manipulation benchmarks each leave out:
 | Dynamics-prediction track | predict how cursor and hand respond to actions under hidden dynamics (world models) |
 | Tracks | `state` (privileged low-dimensional state) and `vision` (cameras, proprioception, instruction text) |
 | Metric | Bench Score: success averaged over tasks, with a stratified-bootstrap 95% CI |
-| Bounds | scripted oracle (privileged) **100.0** on every split, hard tier included; random **≤ 0.6** on every split |
+| Bounds | scripted oracle (privileged) **100.0** on every split, hard tier included; the same expert without privileged access, identifying the hidden dynamics online, **100.0** on `hard_test` and **99.4** on `hard_test_ood`; random **≤ 0.6** on every split |
 | Compute | CPU only; ~2,000 env steps/s per core in the state track, ~70 in the vision track |
 
 ## Contents
@@ -140,11 +140,30 @@ The scripted oracle stays a valid upper bound because it may read the hidden par
 It scores 100.0 on `hard_val`, `hard_test` and `hard_test_ood`, and under every condition of
 the dynamics ablation.
 
+**The hard tier is solvable without privileged access, but only by identifying the dynamics.**
+An upper bound that reads the hidden parameters does not show that an agent can succeed from
+what it observes. `adaptive-expert` (`learning/adaptive.py`) runs the oracle's control law on
+the `state` track and holds no reference to the simulator. Every quantity it needs is observed,
+or identified online from the response to its own commands:
+
+- **control latency:** the lag under which replaying its own commands reproduces the motion
+  of the observed hand target; the commands still in flight then give the planned target;
+- **display latency and the cursor mapping:** the cursor's gain and the mouse's rotation as a
+  2×2 matrix, fitted by recursive least squares for every candidate lag. Refitting with
+  forgetting follows pointer acceleration and further rotation. A Smith predictor estimates
+  where the cursor already is from the lagging one;
+- **observation noise:** from the keyboard's observed position, which never moves.
+
+It scores 100.0 on `hard_test` and 99.4 ± 0.8 on `hard_test_ood`. The same control law with
+identification switched off, assuming nominal dynamics (`fixed-expert`), scores 88.3 and 1.7.
+The out-of-range split can therefore be solved from observations, and solving it requires
+inferring the dynamics.
+
 A memoryless policy cannot infer any of these parameters. The hard tier therefore separates
 agents that *adapt in context*, from the response to their own recent actions, from agents
-that merely imitate. The baselines are behaviour cloning with and without a short history of
-observations and actions, each also refined with DAgger, and the v1.0 policy applied
-zero-shot.
+that merely imitate. The learned baselines are behaviour cloning with and without a short
+history of observations and actions, each also refined with DAgger, and the v1.0 policy applied
+zero-shot. The two non-privileged scripted experts above are reported with them.
 
 A single-factor **dynamics ablation** (`python -m benchmark ablate`, `benchmark/ablation.py`)
 attributes failures to individual effects. It replays the `hard_test` episodes and pushes
@@ -233,13 +252,18 @@ agents on the same split.
 
 ## Baselines and results
 
-Three baselines on the standard splits; the hard tier adds four learned ones
+Five baselines on the standard splits; the hard tier adds four learned ones
 ([below](#hard-tier)). The scripted oracle is reported as a privileged reference; it reads the
 simulator state directly.
 
 * **random**: uniform random actions (hand moves within ±6 mm per step, finger 0–1).
 * **oracle (privileged)**: the scripted expert (`learning/scripted_policy.py`). It establishes
   that every episode is solvable.
+* **adaptive-expert** and **fixed-expert** (state track, not learned): the oracle's control
+  law without privileged access (`learning/adaptive.py`). `adaptive-expert` identifies the
+  hidden dynamics online, `fixed-expert` assumes the nominal ones; see the
+  [hard tier](#hard-tier-hidden-real-world-dynamics). They establish that every episode is
+  solvable from the `state` track's observations alone.
 * **bc** (state track): an MLP behaviour-cloning policy (`learning/policy.py`).
   * Inputs: the 70 state features.
   * Outputs: the expert's waypoint offset and finger command.
@@ -260,7 +284,9 @@ Mean ± std over 3 seeds for `bc`; bootstrap 95% CI half-width for single runs.
 
 | Agent | Track | test | test_layout | test_visual | test_dynamics | val |
 |---|---|---|---|---|---|---|
+| adaptive-expert | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
 | bc | state | 96.1 ± 4.0 | 63.9 ± 9.9 | 94.8 ± 5.8 | 84.8 ± 1.5 | 96.1 ± 5.1 |
+| fixed-expert | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
 | random | state | 0.0 ± 0.0 | 0.0 ± 0.0 | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
 | oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
 
@@ -331,6 +357,11 @@ all selection was done on `val`.
 
 ### Findings
 
+Every standard split is solvable from the state track alone: both non-privileged experts score
+100.0 on every task of every standard split. Nominal physics has no hidden dynamics, so
+identification is not needed there. BC's drops below are therefore failures of learning to
+generalise, not infeasible episodes.
+
 1. **Unseen content in familiar scenes is close to solved in the state track:** 96.1 ± 4.0.
    Given the next sub-goal, an MLP generalises to strings and queries it never saw, and on
    `test` it is as fast as the oracle (4.2 s mean time to success) with almost no errors.
@@ -353,6 +384,9 @@ all selection was done on `val`.
 Realistic physics with hidden per-episode dynamics. All learned agents use the `bc` recipe
 above, with 3 seeds each.
 
+* **adaptive-expert** and **fixed-expert**: the non-privileged scripted experts
+  ([above](#hard-tier-hidden-real-world-dynamics)), with and without online identification of
+  the hidden dynamics. Deterministic and not trained: one run each.
 * **bc-nominal**: the `bc` checkpoints above, trained in nominal physics, applied zero-shot.
 * **bc**: trained on 100 oracle demonstrations per task on `hard_train`, under hidden
   dynamics (894 of 900 episodes kept, 202k samples). The oracle reads the hidden parameters,
@@ -376,6 +410,8 @@ Bench Score, mean ± std over 3 seeds (single runs: bootstrap 95% CI half-width)
 | bc-dagger | state | 69.3 ± 22.5 | 15.4 ± 0.9 | 67.8 ± 22.9 |
 | **bc-history-dagger** | state | **98.5 ± 0.9** | **19.4 ± 2.8** | **99.1 ± 0.7** |
 | random | state | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
+| fixed-expert (scripted, no identification) | state | 88.3 ± 4.4 | 1.7 ± 1.9 | 93.3 ± 3.3 |
+| **adaptive-expert** (scripted, online identification) | state | **100.0 ± 0.0** | **99.4 ± 0.8** | **100.0 ± 0.0** |
 | oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
 
 ![Hard tier: Bench Score of every learned agent, and the dynamics ablation](docs/hard_results.png)
@@ -394,6 +430,8 @@ agent has one colour in both panels.*
 | bc-dagger | 62 | 100 | 100 | 55 | 100 | 100 | 32 | 32 | 43 | 69.3 ± 22.5 |
 | bc-history-dagger | 100 | 100 | 100 | 100 | 100 | 98 | 95 | 95 | 98 | 98.5 ± 0.9 |
 | random | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0.6 ± 0.8 |
+| fixed-expert | 95 | 100 | 100 | 80 | 100 | 100 | 60 | 65 | 95 | 88.3 ± 4.4 |
+| adaptive-expert | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
 | oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
 
 #### Success % per task: `hard_test_ood`
@@ -406,6 +444,8 @@ agent has one colour in both panels.*
 | bc-dagger | 12 | 42 | 27 | 0 | 37 | 20 | 2 | 0 | 0 | 15.4 ± 0.9 |
 | bc-history-dagger | 7 | 52 | 53 | 2 | 43 | 18 | 0 | 0 | 0 | 19.4 ± 2.8 |
 | random | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 ± 0.0 |
+| fixed-expert | 5 | 0 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 1.7 ± 1.9 |
+| adaptive-expert | 100 | 100 | 100 | 100 | 100 | 95 | 100 | 100 | 100 | 99.4 ± 0.8 |
 | oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
 
 #### Errors per episode and mean time to success
@@ -414,12 +454,16 @@ agent has one colour in both panels.*
 |---|---|---|---|---|---|---|
 | bc-nominal | `hard_test` | 0.01 | 7.10 | 0.22 | 5.28 | 5.2 |
 | bc-history-dagger | `hard_test` | 2.62 | 0.04 | 0.01 | 4.92 | 6.0 |
+| fixed-expert | `hard_test` | 11.37 | 0.07 | 0.00 | 13.35 | 7.8 |
+| adaptive-expert | `hard_test` | 0.01 | 0.00 | 0.00 | 3.18 | 4.8 |
 | oracle (privileged) | `hard_test` | 0.00 | 0.00 | 0.00 | 3.05 | 4.6 |
 | bc-nominal | `hard_test_ood` | 1.31 | 1.34 | 69.13 | 5.96 | 7.6 |
 | bc | `hard_test_ood` | 8.04 | 2.39 | 94.31 | 18.54 | 6.8 |
 | bc-dagger | `hard_test_ood` | 6.12 | 1.80 | 125.95 | 10.71 | 8.0 |
 | bc-history | `hard_test_ood` | 4.17 | 0.76 | 12.96 | 7.41 | 7.4 |
 | bc-history-dagger | `hard_test_ood` | 9.40 | 1.21 | 11.37 | 16.41 | 5.5 |
+| fixed-expert | `hard_test_ood` | 11.26 | 1.25 | 33.43 | 13.36 | 5.3 |
+| adaptive-expert | `hard_test_ood` | 0.17 | 0.61 | 0.28 | 7.84 | 7.3 |
 | oracle (privileged) | `hard_test_ood` | 0.02 | 0.24 | 0.19 | 6.82 | 6.7 |
 
 `python -m benchmark report results/*.json --table errors --split hard_test` lists every agent.
@@ -429,9 +473,11 @@ agent has one colour in both panels.*
 1. **The hard tier separates in-range adaptation from extrapolation.**
    - In range, the best learned agent reaches 98.5 ± 0.9.
    - Beyond the training range, every learned agent scores at most 19.4 ± 2.8.
-   - The oracle, which reads the hidden parameters, scores 100 on both.
-   - The out-of-range gap (80 points) is what an agent that infers the dynamics in context,
-     rather than memorising their range, should close.
+   - Without privileged access, a controller that identifies the dynamics online scores 99.4
+     ± 0.8 beyond the range, at every latency (98–100% at 40, 60 and 80 ms). The same
+     controller assuming nominal dynamics scores 1.7.
+   - The out-of-range gap (80 points) is therefore closable from observations, and closing it
+     takes inferring the dynamics in context rather than memorising their range.
 2. **Imitating a privileged teacher fails without on-policy data.**
    - The oracle acts on state the student cannot observe: commands still in flight, the true
      hand position, the mouse's rotation and gain.
@@ -467,7 +513,9 @@ agent has one colour in both panels.*
    | bc-history-dagger | 40.0 | 15.6 | 1.8 |
 
    - Training covered at most 20 ms.
-   - The history policy degrades most gracefully, but no policy copes with 80 ms.
+   - The history policy degrades most gracefully, but no learned policy copes with 80 ms.
+     `adaptive-expert` succeeds in 100.0%, 98.4% and 100.0% of episodes at 40, 60 and 80 ms;
+     `fixed-expert` in 5.0%, 0.0% and 0.0%.
    - Memoryless policies also collide with the desk or keyboard 69–126 times per episode,
      against 11–13 for the history policies.
    - The [dynamics ablation](#dynamics-ablation) confirms that latency, not the other
@@ -487,23 +535,24 @@ task under 13 conditions:
 - **one parameter at a time:** pushed to its `real_ood` value, all others in range;
 - **all:** every parameter pushed.
 
-Bench Score is mean ± std over 3 seeds. The oracle scores 100.0 under every condition.
+Learned agents: mean ± std over 3 seeds. The scripted experts are single deterministic runs
+(bootstrap 95% CI half-width). The oracle scores 100.0 under every condition.
 
-| Condition | bc-nominal | bc-dagger | bc-history-dagger |
-|---|---|---|---|
-| in range | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 |
-| **control latency** (40–80 ms) | **6.7 ± 1.8** | **20.7 ± 2.8** | **31.1 ± 4.8** |
-| display latency (60–100 ms) | 51.1 ± 4.8 | 68.1 ± 22.2 | 96.3 ± 2.1 |
-| actuation noise | 87.4 ± 5.2 | 68.9 ± 23.2 | 99.3 ± 1.0 |
-| observation noise | 86.7 ± 6.5 | 68.1 ± 23.4 | 99.3 ± 1.0 |
-| arm sag | 90.4 ± 1.0 | 65.9 ± 19.2 | 98.5 ± 1.0 |
-| pointer acceleration | 73.3 ± 1.8 | 67.4 ± 21.2 | 97.8 ± 3.1 |
-| mouse rotation | 68.9 ± 12.7 | 64.4 ± 22.0 | 96.3 ± 2.8 |
-| key spring force | 88.9 ± 0.0 | 68.1 ± 22.2 | 97.8 ± 1.8 |
-| key actuation depth | 88.1 ± 1.0 | 68.9 ± 22.0 | 96.3 ± 1.0 |
-| auto-repeat | 86.7 ± 3.1 | 68.1 ± 22.2 | 99.3 ± 1.0 |
-| double-click time | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 |
-| all | 3.0 ± 1.0 | 9.6 ± 2.8 | 20.0 ± 3.1 |
+| Condition | bc-nominal | bc-dagger | bc-history-dagger | fixed-expert | adaptive-expert |
+|---|---|---|---|---|---|
+| in range | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 | 86.7 ± 6.7 | 100.0 ± 0.0 |
+| **control latency** (40–80 ms) | **6.7 ± 1.8** | **20.7 ± 2.8** | **31.1 ± 4.8** | **17.8 ± 7.8** | 100.0 ± 0.0 |
+| display latency (60–100 ms) | 51.1 ± 4.8 | 68.1 ± 22.2 | 96.3 ± 2.1 | 53.3 ± 11.1 | 100.0 ± 0.0 |
+| actuation noise | 87.4 ± 5.2 | 68.9 ± 23.2 | 99.3 ± 1.0 | 93.3 ± 4.4 | 100.0 ± 0.0 |
+| observation noise | 86.7 ± 6.5 | 68.1 ± 23.4 | 99.3 ± 1.0 | 88.9 ± 7.8 | 100.0 ± 0.0 |
+| arm sag | 90.4 ± 1.0 | 65.9 ± 19.2 | 98.5 ± 1.0 | 82.2 ± 8.9 | 100.0 ± 0.0 |
+| pointer acceleration | 73.3 ± 1.8 | 67.4 ± 21.2 | 97.8 ± 3.1 | 84.4 ± 7.8 | 100.0 ± 0.0 |
+| mouse rotation | 68.9 ± 12.7 | 64.4 ± 22.0 | 96.3 ± 2.8 | 86.7 ± 8.9 | 100.0 ± 0.0 |
+| key spring force | 88.9 ± 0.0 | 68.1 ± 22.2 | 97.8 ± 1.8 | 86.7 ± 6.7 | 100.0 ± 0.0 |
+| key actuation depth | 88.1 ± 1.0 | 68.9 ± 22.0 | 96.3 ± 1.0 | 88.9 ± 6.7 | 100.0 ± 0.0 |
+| auto-repeat | 86.7 ± 3.1 | 68.1 ± 22.2 | 99.3 ± 1.0 | 86.7 ± 6.7 | 100.0 ± 0.0 |
+| double-click time | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 | 86.7 ± 6.7 | 100.0 ± 0.0 |
+| all | 3.0 ± 1.0 | 9.6 ± 2.8 | 20.0 ± 3.1 | 0.0 ± 0.0 | 100.0 ± 0.0 |
 
 1. **Control latency alone causes most of the collapse.**
    - Pushing only the latency out of range takes the best policy from 100.0 to 31.1. Pushing
@@ -526,6 +575,11 @@ Bench Score is mean ± std over 3 seeds. The oracle scores 100.0 under every con
      [finding 4](#findings-1)). The extra strength beyond the training range adds little.
 4. **Effects compound.** "all" is below the worst single effect for every policy: 20.0
    against 31.1 for `bc-history-dagger`.
+5. **Identification removes every failure.** With online identification the scripted expert
+   scores 100.0 under every condition, "all" included. Without it, the same law fails on
+   exactly the two effects that break the learned policies: control latency (17.8) and display
+   latency (53.3). The ablation's failures are therefore failures to infer the dynamics, not
+   effects that make the episodes infeasible.
 
 ### Dynamics-prediction results
 
@@ -586,6 +640,7 @@ The hard tier, the dynamics ablation and the dynamics-prediction track:
 sh scripts/run_hard_baselines.sh     # oracle, random, bc, bc-history, bc-nominal; ~55 min
 sh scripts/run_hard_dagger.sh        # bc-dagger, bc-history-dagger; ~70 min
 sh scripts/run_hard_ablation.sh      # dynamics ablation, 10 runs
+sh scripts/run_adaptive.sh           # adaptive-expert and fixed-expert: every split + ablation; ~10 min
 python -m benchmark report results/*.json --table hard
 python -m benchmark report results/*.json --table ablation
 python -m benchmark.world_model collect && python -m benchmark.world_model train \
@@ -600,6 +655,8 @@ python -m benchmark.world_model collect && python -m benchmark.world_model train
    episodes per task, the oracle labels every visited state, and the student is retrained on
    all data so far.
 3. `run_hard_ablation.sh` runs the dynamics ablation for the oracle, `bc-nominal`, `bc-dagger` and `bc-history-dagger`, with 5 `hard_test` episodes per task and condition.
+4. `run_adaptive.sh` evaluates `adaptive-expert` and `fixed-expert` on every split and runs
+   their dynamics ablation. They are deterministic and not trained.
 
 ## Evaluating your own agent
 
@@ -657,6 +714,14 @@ README).
   - The oracle solves both hard test splits and every ablation condition.
   - DAgger collection executes the student's actions and keeps the oracle's labels. Parallel
     collection gives the same data as sequential collection.
+- **Solvable without privileged access.** The oracle and `adaptive-expert` share one control
+  law through interchangeable views of the world. When the law was moved behind the views, the
+  oracle's actions were checked once to be unchanged on 72 episodes (18,175 steps) across
+  nominal and realistic physics. `tests/test_adaptive.py` checks that:
+  - `adaptive-expert` holds no reference to the simulator, by walking every object it can
+    reach;
+  - on out-of-range episodes it identifies the true control and display latency and succeeds,
+    and the same law without identification fails.
 - **Dynamics prediction** (`tests/test_world_model.py`): windows never cross episodes, and the
   kinematic baseline is exact when the physics is kinematic.
 

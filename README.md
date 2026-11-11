@@ -47,6 +47,7 @@ python -m benchmark report results/*.json --table splits --format latex
 python -m benchmark run --agent oracle --all-hard --workers 8        # hard tier
 python -m benchmark report results/*.json --table hard
 python -m benchmark ablate --agent oracle --workers 8                # dynamics ablation
+python -m benchmark run --agent adaptive --all-hard --workers 8      # non-privileged expert
 python -m benchmark.world_model evaluate                             # dynamics-prediction track
 ```
 
@@ -71,12 +72,17 @@ Hard tier: realistic physics with hidden per-episode dynamics, as Bench Score (m
 | bc-history | 29.6 ± 4.2 | 4.3 ± 0.9 |
 | bc-dagger | 69.3 ± 22.5 | 15.4 ± 0.9 |
 | bc-history-dagger | **98.5 ± 0.9** | **19.4 ± 2.8** |
+| fixed-expert (scripted, assumes nominal dynamics) | 88.3 | 1.7 |
+| adaptive-expert (scripted, identifies the dynamics online) | 100.0 | 99.4 |
 | oracle (privileged: reads the hidden parameters) | 100.0 | 100.0 |
 
 - **In range:** with DAgger and a short history of its own actions, imitation handles the
   hidden dynamics.
-- **Beyond the training range:** every learned agent fails, mostly through control latency,
-  while the oracle still succeeds.
+- **Beyond the training range:** every learned agent fails, mostly through control latency.
+- **Solvable without privileged access:** the oracle's control law on observations alone
+  scores 99.4 beyond the range when it identifies latency and the cursor mapping online, and
+  1.7 when it does not (`learning/adaptive.py`). The gap is closable, and closing it takes
+  inferring the dynamics.
 - **Dynamics-prediction track:** an MLP world model predicts the cursor 400 ms ahead to 14 px
   in range, and to 32 px beyond it.
 
@@ -100,6 +106,7 @@ agent are in **[BENCHMARK.md](BENCHMARK.md)**.
 | Hard tier: realistic physics with hidden per-episode dynamics (latency, acceleration, rotating mouse, sag, noise, per-key forces, auto-repeat, double-click) | ✅ `environment/dynamics.py`, `hard_*` splits |
 | Dynamics-prediction (world-model) track | ✅ `benchmark/world_model.py` |
 | DAgger baselines (privileged oracle → student) and single-factor dynamics ablation | ✅ `scripts/run_hard_dagger.sh`, `benchmark/ablation.py` |
+| Non-privileged expert with online system identification (solvability of the hard tier from observations) | ✅ `learning/adaptive.py`, `scripts/run_adaptive.sh` |
 | Vision-track learned agent | ⏳ the open challenge; data pipeline and CNN encoder exist (`--images`), no baseline yet |
 | Gymnasium API: registered envs, state/pixel observations, seeding, vector envs, render modes | ✅ `environment/gym_env.py` |
 | RL (PPO/SAC) | ⏳ Gymnasium env and shaped reward are ready; no RL trainer yet |

@@ -14,6 +14,8 @@ no uncommitted changes to tracked files.
 | `hard_bch_s{0,1,2}_*.json` | the same with a 4-step history (`bc-history`) | `run_hard_baselines.sh` |
 | `hard_bcd_s{0,1,2}_*.json` | `bc` after two DAgger iterations (`bc-dagger`) | `run_hard_dagger.sh` |
 | `hard_bchd_s{0,1,2}_*.json` | `bc-history` after two DAgger iterations (`bc-history-dagger`) | `run_hard_dagger.sh` |
+| `adaptive_*.json`, `fixed_*.json` | non-privileged scripted experts, with and without online identification of the hidden dynamics | `run_adaptive.sh` |
+| `ablation_*.json` | dynamics ablation on `hard_test`, one file per agent and seed | `run_hard_ablation.sh`, `run_adaptive.sh` |
 | `world_model.json` | dynamics-prediction track: persistence, kinematic and MLP (3 seeds) | `benchmark.world_model` |
 
 Each episode-result file holds:

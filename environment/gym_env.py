@@ -7,8 +7,9 @@
     obs, info = env.reset(seed=0)
     obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
 
-Registered IDs: ComputerXRobot/ComputerUse-v0 (all tasks), TypeKey-v0, TypeText-v0,
-Search-v0, OpenResult-v0, OpenApp-v0, ClearText-v0. `gym.make("environment.gym_env:ComputerXRobot/...")`
+Registered IDs: ComputerXRobot/ComputerUse-v0 (all tasks) and one per task: TypeKey-v0,
+OpenApp-v0, CloseWindow-v0, TypeText-v0, ClearText-v0, OpenFile-v0, Search-v0, OpenResult-v0,
+WriteNote-v0. `gym.make("environment.gym_env:ComputerXRobot/...")`
 imports this module automatically.
 
 Action: Box(-1, 1, (4,)) = [dx, dy, dz, finger]. dx..dz move the tool target by up to
@@ -26,7 +27,9 @@ Observation, by `obs_mode`:
     "both"    the pixel Dict plus "state"
 
 Episodes: each reset samples a task from `tasks` and `split` with the env's RNG, or uses
-options={"task": name, "text": text}. `terminated` means the task succeeded; `truncated` means
+options={"task": name, "text": text}. `scene` ("none", "id", "ood_layout", "ood_visual",
+"ood_dynamics"; environment/variation.py) draws a new scene variation each reset; use "id" to
+train on the benchmark's training distribution, or options={"scene": ...} for one episode. `terminated` means the task succeeded; `truncated` means
 its time limit ran out. The reward is the simulation's shaped reward: progress gained,
 +1 on success, -0.1 per wrong key or failed click.
 
@@ -48,6 +51,7 @@ from gymnasium import spaces
 
 from environment.computer_env import ComputerUseEnv, EnvConfig
 from environment.task_manager import SPLITS, TASKS, Task, make_task
+from environment.variation import DISTRIBUTIONS, sample_variation
 from learning.dataset import FEATURE_DIM, low_dim_features
 from learning.scripted_policy import ScriptedPolicy
 
@@ -66,7 +70,11 @@ class ComputerUseGymEnv(gym.Env):
         image_size: tuple[int, int] | dict[str, tuple[int, int]] | None = None,
         screen_size: tuple[int, int] = (400, 640),
         render_mode: str | None = None,
+        scene: str = "none",
     ):
+        if scene not in DISTRIBUTIONS:
+            raise ValueError(f"scene must be one of {DISTRIBUTIONS}")
+        self.scene = scene
         unknown = set(tasks) - set(TASKS)
         if unknown:
             raise ValueError(f"unknown tasks {sorted(unknown)}; choose from {sorted(TASKS)}")
@@ -106,7 +114,9 @@ class ComputerUseGymEnv(gym.Env):
     # ---------------------------------------------------------------- core API
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
-        obs = self.sim.reset(self._choose_task(options or {}))
+        options = options or {}
+        variation = sample_variation(options.get("scene", self.scene), self.np_random)
+        obs = self.sim.reset(self._choose_task(options), variation=variation)
         self._expert.reset()
         if self.render_mode == "human":
             self.render()
@@ -215,6 +225,9 @@ ENV_IDS = {
     "ComputerXRobot/OpenResult-v0": {"tasks": ("open_result",)},
     "ComputerXRobot/OpenApp-v0": {"tasks": ("open_app",)},
     "ComputerXRobot/ClearText-v0": {"tasks": ("clear_text",)},
+    "ComputerXRobot/CloseWindow-v0": {"tasks": ("close_window",)},
+    "ComputerXRobot/OpenFile-v0": {"tasks": ("open_file",)},
+    "ComputerXRobot/WriteNote-v0": {"tasks": ("write_note",)},
 }
 
 

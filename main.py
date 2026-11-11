@@ -345,7 +345,8 @@ def cmd_train(args) -> int:
     demos = Demonstrations.concatenate([Demonstrations.load(p) for p in args.data])
     print(f"Training BC on {len(demos)} samples from {len(demos.task_specs)} episodes")
     train_bc(demos, args.out, epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
-             use_images=args.images, device=args.device, seed=args.seed)
+             use_images=args.images, device=args.device, seed=args.seed, hidden=args.hidden,
+             loss_beta=args.loss_beta)
     return 0
 
 
@@ -429,12 +430,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("train", help="train a behaviour cloning policy")
     p.add_argument("--data", nargs="+", default=["data/demos.npz"])
     p.add_argument("--out", default="checkpoints/bc.pt")
-    p.add_argument("--epochs", type=int, default=40)
+    p.add_argument("--epochs", type=int, default=80)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--images", action="store_true", help="use image observations (CNN encoders)")
     p.add_argument("--device", default="auto")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--hidden", type=int, default=256, help="MLP width")
+    p.add_argument("--loss-beta", type=float, default=0.05, help="smooth-L1 beta (smaller = closer to L1)")
     p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("evaluate", help="success rate, time, failed presses/clicks, collisions")

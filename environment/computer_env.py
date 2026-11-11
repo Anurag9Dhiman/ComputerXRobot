@@ -18,6 +18,8 @@ Observation (dict):
     tool_pos, tool_target        (3,)
     mouse_pos (2,) metres, cursor (2,) pixels, key_down, button_down, palm_on_mouse
     mouse_button (3,)            top of the mouse button the task needs next (left by default)
+    keyboard_pos (3,)            keyboard origin (its placement varies between scenes)
+    instruction                  the task in words, e.g. 'Search the web for "mouse control"'
     expected_char, click_target, click_button, click_target_px
                                  task state (see TaskManager.features)
 
@@ -41,6 +43,7 @@ from environment.keyboard_layout import CAP_CENTER_Z, CAP_HALF_HEIGHT, KEY_BY_CH
 from environment.screen import SceneRenderer, ScreenTexture, paint_keycap_labels, paint_mouse_labels
 from environment.task_manager import Task, TaskManager, TaskStatus, make_task
 from environment.ui_events import PhysicalUIBridge, UIEvent
+from environment.variation import NOMINAL, SceneVariation, VariationApplier
 
 SCENE_PATH = Path(__file__).resolve().parent / "scene.xml"
 
@@ -71,8 +74,9 @@ class EnvConfig:
     render_obs: bool = True  # False -> no images in observations (fast data collection)
     # Home pose: beside the keyboard, so the top-down keyboard camera sees every key at reset.
     home_tool_pos: tuple[float, float, float] = (0.40, -0.12, 0.86)
-    workspace_low: tuple[float, float, float] = (0.30, -0.45, 0.765)
-    workspace_high: tuple[float, float, float] = (0.72, 0.30, 1.00)
+    # Tool-target limits; wide enough for every device placement in environment/variation.py.
+    workspace_low: tuple[float, float, float] = (0.28, -0.55, 0.765)
+    workspace_high: tuple[float, float, float] = (0.75, 0.36, 1.00)
 
 
 @dataclass
@@ -107,8 +111,11 @@ class ComputerUseEnv:
         self._button_sites = {b: self.model.site(f"mouse_{b}_top").id for b in ("left", "right")}
         self._rest_site = self.model.site("mouse_rest_top").id
         self._key_tops = self._compute_key_tops()
+        self._keyboard_body = self.model.body("keyboard").id
         self.tool_target = np.array(self.config.home_tool_pos, dtype=float)
         self.finger_cmd = 0.0
+        self.variation = NOMINAL
+        self._variations = VariationApplier(self)
 
     # ------------------------------------------------------------- geometry
     def _compute_key_tops(self) -> dict[str, np.ndarray]:
@@ -129,9 +136,15 @@ class ComputerUseEnv:
         return self.data.site_xpos[self._rest_site].copy()
 
     # ------------------------------------------------------------- core API
-    def reset(self, task: Task | None = None) -> dict:
+    def reset(self, task: Task | None = None, variation: SceneVariation | None = None) -> dict:
+        """Start an episode. `variation` changes the scene (environment/variation.py); without
+        it the current scene is kept (the canonical one unless a variation was applied)."""
         if task is not None:
             self.task = task
+        if variation is not None and variation != self.variation:
+            self._variations.apply(variation)
+            self.variation = variation
+            self._key_tops = self._compute_key_tops()
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         home = np.array(self.config.home_tool_pos, dtype=float)
@@ -169,6 +182,7 @@ class ComputerUseEnv:
         c, d = self.controller, self.data
         feats = self.tasks.features()
         obs = {
+            "instruction": self.task.instruction,
             "qpos": np.append(c.arm_qpos(d), c.finger_extension(d)),
             "qvel": np.append(c.arm_qvel(d), d.qvel[self.model.joint("finger").dofadr[0]]),
             "tool_pos": c.tool_pos(d),
@@ -180,6 +194,7 @@ class ComputerUseEnv:
             "button_down": bool(self.devices.button_down),
             "palm_on_mouse": bool(self.devices.palm_on_mouse),
             "mouse_button": self.mouse_button_top(feats["click_button"] or "left"),
+            "keyboard_pos": self.data.xpos[self._keyboard_body].copy(),
             **feats,
         }
         if self.config.render_obs:

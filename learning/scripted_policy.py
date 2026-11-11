@@ -34,8 +34,8 @@ it directly (learning/dataset.py stores the waypoint as the training label).
 
 The expert uses privileged simulator state (key positions, widget rectangles, cursor,
 mouse position). `noise_scale` tells the data collector how much perturbation the current
-phase tolerates: full while flying, little while pressing, almost none while dragging (the
-cursor moves 6.4 px per millimetre of mouse travel).
+phase tolerates: full while flying, 30% while pressing keys and dragging the mouse (so
+demonstrations include recovering from cursor overshoot), none during a click.
 """
 
 from __future__ import annotations
@@ -171,7 +171,7 @@ class ScriptedPolicy:
             return
         near, far = CLICK_RAMP_PX
         self.finger = CLICK_CMD * float(np.clip((far - err_px) / (far - near), 0.0, 1.0))
-        self.noise_scale = 0.03
+        self.noise_scale = 0.3
         if err_px > near:
             # Proportional servo on the cursor error. Inverse of the cursor mapping
             # (environment/ui_events.py): du = -g*dy, dv = -g*dx. Covering only part of the

@@ -239,6 +239,8 @@ class FileManager(App):
         ("notes.txt", "meeting at 10\nrobot demo on friday"),
         ("todo.txt", "collect demos\ntrain policy\nevaluate"),
         ("papers.txt", "robot typing\ncomputer use in simulation"),
+        ("ideas.txt", "a robot that types\nrandomise the scene"),
+        ("readme.txt", "computer x robot\nbenchmark v1"),
     )
 
     def layout(self, content):
@@ -425,6 +427,7 @@ class Browser(App):
 class Desktop:
     def __init__(self, size: tuple[int, int] = (SCREEN_W, SCREEN_H)):
         self.size = size
+        self.wallpaper = C_DESKTOP  # set per scene (environment/variation.py); survives reset()
         self.apps: dict[str, App] = {cls.name: cls(self) for cls in (Browser, TextEditor, FileManager)}
         self._surface = pygame.Surface(self.size)
         self.reset()
@@ -442,6 +445,12 @@ class Desktop:
 
     def _changed(self) -> None:
         self.version += 1
+
+    def set_wallpaper(self, rgb) -> None:
+        rgb = tuple(int(c) for c in rgb)
+        if rgb != self.wallpaper:
+            self.wallpaper = rgb
+            self._changed()
 
     # ---- window management
     def open_app(self, name: str) -> None:
@@ -564,7 +573,7 @@ class Desktop:
         return self._surface
 
     def _draw(self, s: pygame.Surface) -> None:
-        s.fill(C_DESKTOP)
+        s.fill(self.wallpaper)
         pygame.draw.rect(s, C_DOCK, (0, 0, DOCK_W, self.size[1]))
         widgets = self.widgets()
         for name, label in DOCK_APPS:

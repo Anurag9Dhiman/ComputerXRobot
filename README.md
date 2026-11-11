@@ -6,8 +6,10 @@ a pad, and a monitor whose screen is a live simulated desktop (text editor, file
 browser with an offline search engine, right-click menus). Key travel and mouse motion are
 mapped explicitly to UI events, tasks are checked against the desktop state, and every key
 legend, mouse button and piece of screen text is legible in camera images and comes with
-ground-truth boxes. A scripted expert, a behaviour-cloning pipeline and an evaluation suite
-are included.
+ground-truth boxes. On top of it sits **[ComputerXRobot-Bench v1.0](BENCHMARK.md)**: 9 tasks in
+4 difficulty levels, held-out content, scene shifts in layout, appearance and device dynamics,
+two observation tracks, and an evaluation harness with fixed episodes and confidence
+intervals. A scripted oracle, a random agent and behaviour-cloning baselines are included.
 
 ![What a model sees while the robot works: the keyboard, screen and mouse close-up cameras with every key legend, screen string, the L/R mouse buttons and the cursor labelled; the key or button being pressed is highlighted](docs/demo.gif)
 
@@ -23,6 +25,29 @@ hidden under the hand are counted as not visible. Regenerate with
 The default `--view dashboard` shows the 3D scene, robot camera, screen and task status
 instead (`docs/dashboard.png`).*
 
+## Benchmark
+
+```bash
+python -m benchmark list                                    # tasks, splits, tracks
+python -m benchmark run --agent oracle --all-test --workers 8
+python -m benchmark run --agent my_agent:MyAgent --all-test --workers 8   # your agent
+python -m benchmark report results/*.json --table splits --format latex
+```
+
+Bench Score (success % averaged over the 9 tasks; `bc` = mean ± std over 3 seeds; single runs
+± bootstrap 95% CI half-width):
+
+| Agent | Track | test | test_layout | test_visual | test_dynamics | val |
+|---|---|---|---|---|---|---|
+| bc | state | 96.1 ± 4.0 | 63.9 ± 9.9 | 94.8 ± 5.8 | 84.8 ± 1.5 | 96.1 ± 5.1 |
+| random | state | 0.0 ± 0.0 | 0.0 ± 0.0 | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
+| oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
+
+![BC Bench Score per split and per level](docs/benchmark_results.png)
+
+Protocol, task and split definitions, metrics, the full per-task results and how to add an
+agent are in **[BENCHMARK.md](BENCHMARK.md)**.
+
 ## Status
 
 | Stage | State |
@@ -33,8 +58,9 @@ instead (`docs/dashboard.png`).*
 | Physical → UI mapping: key press, relative mouse → cursor, left button → click, right button → context menu, screen texture refresh | ✅ |
 | Legibility: readable key legends, "L"/"R" mouse buttons and screen text in close-up cameras, plus ground-truth boxes/labels for each part | ✅ checked by `tests/test_legibility.py` |
 | Scripted expert for every task (type, search, open result, open app, clear text via right-click) | ✅ 100% success, no wrong keys / clicks / collisions |
-| Data collection → behaviour cloning → evaluation on unseen tasks | ✅ baseline (see [Results](#results)) |
-| Vision-only policy (CNN encoder on camera + screen images) | 🧪 pipeline runs (`--images`); not tuned |
+| Data collection → behaviour cloning → evaluation on unseen tasks | ✅ baseline (see [Benchmark](#benchmark)) |
+| Benchmark: 9 tasks in 4 levels, scene variation (layout / visual / dynamics), fixed test splits, `state` and `vision` tracks, parallel harness with bootstrap CIs, LaTeX tables | ✅ `benchmark/`, [BENCHMARK.md](BENCHMARK.md) |
+| Vision-track learned agent | ⏳ the open challenge; data pipeline and CNN encoder exist (`--images`), no baseline yet |
 | Gymnasium API: registered envs, state/pixel observations, seeding, vector envs, render modes | ✅ `environment/gym_env.py` |
 | RL (PPO/SAC) | ⏳ Gymnasium env and shaped reward are ready; no RL trainer yet |
 
@@ -92,10 +118,11 @@ python main.py train --data data/demos.npz --out checkpoints/bc.pt  # ~10 s on C
 python main.py evaluate --policy bc --checkpoint checkpoints/bc.pt --split both --episodes 10
 python main.py demo --policy bc --checkpoint checkpoints/bc.pt --task search --display
 
-python -m pytest -q                                              # 43 tests, ~10 s
+python -m pytest -q                                              # 55 tests, ~20 s
 ```
 
-Tasks (`--task`): `type_key`, `type_text`, `search`, `open_result`, `open_app`, `clear_text`.
+Tasks (`--task`): `type_key`, `open_app`, `close_window`, `type_text`, `clear_text`, `open_file`,
+`search`, `open_result`, `write_note`.
 `--text` is the character, string, query, app name or (for `clear_text`) the editor's
 starting text; without it the first test-split item is used.
 
@@ -154,10 +181,10 @@ env.unwrapped.annotations("keyboard_cam")  # boxes + labels for each key
 
 | | |
 |---|---|
-| IDs | `ComputerXRobot/ComputerUse-v0` (all tasks), `TypeKey-v0`, `TypeText-v0`, `Search-v0`, `OpenResult-v0`, `OpenApp-v0`, `ClearText-v0` |
+| IDs | `ComputerXRobot/ComputerUse-v0` (all tasks) and one per task: `TypeKey-v0`, `OpenApp-v0`, `CloseWindow-v0`, `TypeText-v0`, `ClearText-v0`, `OpenFile-v0`, `Search-v0`, `OpenResult-v0`, `WriteNote-v0` |
 | Action | `Box(-1, 1, (4,))`: tool-target change `dx, dy, dz` (×6 mm per step) and finger (-1 retracted … 1 fully extended) |
-| Observation | `obs_mode="state"`: `Box(67,)` features; `"pixels"`: dict of uint8 images (`cameras`, default `robot_cam`, plus `screen`); `"both"`: pixels plus `"state"`. Camera sizes default per camera (`image_size` takes `(H, W)` or `{camera: (H, W)}`); `screen_size` defaults to the native 400×640 |
-| Episodes | each `reset` samples a task from `tasks`/`split` with the env's RNG, or pass `options={"task": "search", "text": "..."}`. `terminated` = task succeeded, `truncated` = task time limit |
+| Observation | `obs_mode="state"`: `Box(70,)` features; `"pixels"`: dict of uint8 images (`cameras`, default `robot_cam`, plus `screen`); `"both"`: pixels plus `"state"`. Camera sizes default per camera (`image_size` takes `(H, W)` or `{camera: (H, W)}`); `screen_size` defaults to the native 400×640 |
+| Episodes | each `reset` samples a task from `tasks`/`split` with the env's RNG, or pass `options={"task": "search", "text": "..."}`. `scene="id"` (or `ood_layout`, `ood_visual`, `ood_dynamics`) draws a new scene variation per reset, the benchmark's training distribution being `id`. `terminated` = task succeeded, `truncated` = task time limit |
 | Reward | progress gained, +1 on success, −0.1 per wrong key or failed click (a solved episode returns 2.0) |
 | `info` | `task`, `text`, `instruction`, `is_success`, `progress`, `expected` (next char / click target; `"right:<widget>"` = right-click), `ui_state`, `screen_text`, `events`; `metrics` at episode end |
 | Render | `render_mode="rgb_array"` returns the 1280×720 dashboard (works with `gymnasium.wrappers.RecordVideo`, which needs `pip install "gymnasium[other]"`); `"human"` opens a window |
@@ -225,9 +252,9 @@ behaviour cloning can fit it.
 
 ### Learning (`learning/dataset.py`, `learning/policy.py`)
 
-* **Inputs**: 67 low-dimensional features: tool target and tracking error, finger, mouse offset,
-  contact flags, cursor, click target, left/right button needed, that button's position relative
-  to the hand, and a one-hot of the next character. Optionally 64 × 64 camera and screen images through small CNN encoders
+* **Inputs**: 70 low-dimensional features: tool target and tracking error, finger, mouse offset,
+  contact flags, cursor, click target, left/right button needed, that button's and the
+  keyboard's position relative to the hand, and a one-hot of the next character. Optionally 64 × 64 camera and screen images through small CNN encoders
   (`--images`).
 * **Labels**: the expert's waypoint relative to the tool target (cm, clipped to 5 cm) plus the
   finger command, not the clipped per-step action. Near the goal this is close to linear
@@ -239,32 +266,9 @@ behaviour cloning can fit it.
 
 ## Results
 
-`python main.py evaluate --split both --episodes 10` per cell (10 episodes per task and
-split, on this Mac). "Seen" uses training-split content, "unseen" uses the held-out test
-split. For `type_key` and `open_app` both splits contain the same items (every key, every
-app). BC numbers come from one training run (`collect --episodes 40`, `train` defaults) and
-vary between runs.
-
-| Task | Expert success (seen / unseen) | Expert mean time | BC success (seen / unseen) | BC wrong keys / failed clicks per episode (unseen) |
-|---|---|---|---|---|
-| `type_key` | 100% / 100% | 0.9 s | 100% / 100% | 0 / 0 |
-| `type_text` | 100% / 100% | 2.7 s | 100% / 100% | 0.3 / 0 |
-| `search` | 100% / 100% | 8.7 s | 100% / 100% | 2.0 / 0 |
-| `open_result` | 100% / 100% | 10.0 s | 100% / 100% | 2.0 / 0 |
-| `open_app` | 100% / 100% | 1.3 s | 100% / 100% | 0 / 0 |
-| `clear_text` | 100% / 100% | 1.6 s | 0% / 0% | 0 / 0 |
-
-Neither policy had robot collisions in these runs. The expert never pressed a wrong key or
-clicked the wrong widget. The BC policy solves every task except `clear_text`, including
-unseen strings and queries. It presses a few extra keys, which it fixes with backspace
-because the task then asks for `\b`.
-
-`clear_text` needs a right-click, then a left-click. With one finger the hand must lift off
-the R button and re-land on L. BC right-clicks correctly but stalls before the menu click.
-With 4× more `clear_text` demonstrations BC solves it, but `open_app` and `open_result` drop
-to 0%: one MLP blends "switch buttons" with "drag the cursor". A hand with a second finger
-over the R button would remove the switch (see Next steps). Full per-episode results go to
-`outputs/eval_*.json`.
+Baseline results are reported on the benchmark: see [Benchmark](#benchmark) above and the
+per-task, per-level and error tables in [BENCHMARK.md](BENCHMARK.md#baselines-and-results).
+`python main.py evaluate` still runs quick, uncalibrated evaluations on the canonical scene.
 
 ## Project structure
 
@@ -284,6 +288,7 @@ environment/
   task_manager.py      tasks, splits, success checks, reward, event bookkeeping
   computer_env.py      core simulation environment tying everything together
   gym_env.py           Gymnasium wrapper + registered ComputerXRobot/* env IDs
+  variation.py         scene variation: layout, visual and dynamics distributions (id / ood)
 control/
   robot_controller.py  damped-least-squares IK and actuator targets
   contact_detection.py key/button press detection, contact classification
@@ -296,7 +301,11 @@ evaluation/
   metrics.py           success rate, time, wrong keys, failed clicks, collisions
   dashboard.py         demo views: dashboard (3D / camera / screen / result), perception (labelled cameras)
 tests/                 milestone 1, UI mapping, desktop/tasks, pipeline, demo outputs, Gymnasium API, legibility
-docs/                  demo.gif, right_click.gif, devices.png, dashboard.png
+docs/                  demo.gif, right_click.gif, devices.png, dashboard.png, benchmark_results.png
+benchmark/             ComputerXRobot-Bench: suite (splits, episodes), tracks, agents, harness,
+                       metrics, report, plot, example agent; `python -m benchmark`
+scripts/run_baselines.sh   reproduces every baseline result in BENCHMARK.md
+BENCHMARK.md           benchmark card: protocol, tasks, splits, metrics, results
 main.py                CLI: demo (display / mp4 / gif / png), viewer, annotate, collect, train, evaluate
 ```
 

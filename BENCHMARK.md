@@ -416,7 +416,9 @@ Bench Score, mean ± std over 3 seeds (single runs: bootstrap 95% CI half-width)
 
 ![Hard tier: Bench Score of every learned agent, and the dynamics ablation](docs/hard_results.png)
 
-*Left: hard-tier Bench Score (mean of 3 seeds, error bars = std). Right: the dynamics
+*Left: hard-tier Bench Score of the learned agents (mean of 3 seeds, error bars = std). The
+dashed line is the privileged oracle (100.0); the non-privileged `adaptive-expert` scores at
+least 99.4 on both splits. Right: the dynamics
 ablation, mean of 3 seeds; the [table below](#dynamics-ablation) gives the values and std. Each
 agent has one colour in both panels.*
 

@@ -141,7 +141,10 @@ def plot_hard(results: list[dict], out: str) -> None:
         for x, m, sd in zip(xs, means, stds):
             ax.text(x, m + sd + 1.5, f"{m:.0f}", ha="center", va="bottom", fontsize=8, color=INK_2)
     ax.plot([-0.45, len(splits) - 0.55], [100, 100], "--", color=INK_2, lw=1.2, zorder=2)
-    ax.text(len(splits) - 0.55, 101.5, "oracle (privileged)", ha="right", va="bottom", fontsize=8.5, color=INK_2)
+    # The non-privileged adaptive expert sits on the oracle's line; name it there.
+    adaptive = [100 * r["summary"]["score"] for r in evals if r["agent_name"] == "adaptive-expert"]
+    ref = "oracle (privileged)" + (f"\nadaptive-expert ≥ {min(adaptive):.1f}" if adaptive else "")
+    ax.text(len(splits) - 0.55, 98, ref, ha="right", va="top", fontsize=8.5, color=INK_2, linespacing=1.4)
     ax.set_xticks(range(len(splits)), splits)
     ax.set_ylim(0, 112)
     ax.set_ylabel("Bench Score (%)")

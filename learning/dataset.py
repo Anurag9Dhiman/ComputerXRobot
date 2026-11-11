@@ -206,6 +206,8 @@ def collect_demonstrations(
     variations: list | None = None,
     dynamics: list | None = None,
     student=None,
+    observe=None,
+    record_every: int = 1,
 ) -> Demonstrations:
     """Roll out the scripted expert on `tasks` and record (features, expert target) pairs.
 
@@ -217,27 +219,39 @@ def collect_demonstrations(
                   instead of the expert's, and the expert only labels the states the student
                   visits. Pass keep_failures=True to keep the episodes it fails, which carry
                   most of the corrections.
+    observe       optional obs -> {name: array} recorded per step instead of the 64x64
+                  images (e.g. learning/vision.py's vision-track inputs); dtypes are kept
+    record_every  record one step in this many (the rollout and its perturbations are
+                  unchanged; consecutive frames are nearly identical)
     """
     rng = np.random.default_rng(seed)
     expert = ScriptedPolicy(env)
     max_step = env.config.max_step
     feats, targets, actions, eps, specs = [], [], [], [], []
-    images: dict[str, list] = {k: [] for k in IMAGE_KEYS} if with_images else {}
+    raw_images = IMAGE_KEYS if with_images and observe is None else ()  # recorded straight from obs
+    images: dict[str, list] = {k: [] for k in raw_images}
     for i, task in enumerate(tasks):
         obs = env.reset(task, variation=variations[i] if variations else None,
                         dynamics=dynamics[i] if dynamics else None)
         expert.reset()
         if student is not None:
             student.reset()
-        ep_feats, ep_targets, ep_actions, ep_imgs = [], [], [], {k: [] for k in images}
+        ep_feats, ep_targets, ep_actions, ep_imgs = [], [], [], {k: [] for k in raw_images}
         done = False
         push, push_steps = np.zeros(3), 0
+        step = 0
         while not done:
             action = expert.act(obs)
-            ep_feats.append(low_dim_features(obs))
-            ep_targets.append(encode_target(expert.waypoint - env.planned_tool_target(), expert.finger))
-            for k in images:
-                ep_imgs[k].append(obs[k])
+            record = step % record_every == 0
+            step += 1
+            if record:
+                ep_feats.append(low_dim_features(obs))
+                ep_targets.append(encode_target(expert.waypoint - env.planned_tool_target(), expert.finger))
+                if observe is not None:
+                    for k, v in observe(obs).items():
+                        ep_imgs.setdefault(k, []).append(v)
+                for k in raw_images:
+                    ep_imgs[k].append(obs[k])
             if push_steps == 0 and rng.random() < perturb_prob:
                 direction = rng.normal(size=3)
                 push, push_steps = direction / np.linalg.norm(direction) * noise * max_step, int(rng.integers(3, 10))
@@ -248,7 +262,8 @@ def collect_demonstrations(
             if push_steps and student is None:
                 executed[:3] += push * expert.noise_scale
                 push_steps -= 1
-            ep_actions.append(normalize_action(executed, max_step))
+            if record:
+                ep_actions.append(normalize_action(executed, max_step))
             obs, _, done, _ = env.step(executed)
         ok = env.status.success
         if verbose:
@@ -260,13 +275,13 @@ def collect_demonstrations(
             actions += ep_actions
             eps += [len(specs)] * len(ep_targets)
             specs.append(task.spec())
-            for k in images:
-                images[k] += ep_imgs[k]
+            for k, v in ep_imgs.items():
+                images.setdefault(k, []).extend(v)
     return Demonstrations(
         np.asarray(feats, np.float32).reshape(-1, FEATURE_DIM),
         np.asarray(targets, np.float32).reshape(-1, 4),
         np.asarray(eps, np.int32),
-        {k: np.asarray(v, np.uint8) for k, v in images.items()},
+        {k: np.asarray(v, np.uint8) if observe is None else np.stack(v) for k, v in images.items() if v},
         specs,
         np.asarray(actions, np.float32).reshape(-1, 4),
     )

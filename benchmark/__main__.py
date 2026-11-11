@@ -76,7 +76,7 @@ def cmd_collect(args) -> int:
     print(f"Collecting {n} episodes on {args.split} ({SPLITS[args.split].physics} physics, {who})")
     t0 = time.time()
     demos = collect(args.split, args.per_task, args.tasks, noise=args.noise, seed=args.seed, images=args.images,
-                    student=args.student, workers=args.workers)
+                    student=args.student, workers=args.workers, vision=args.vision)
     demos.save(args.out)
     print(f"saved {len(demos)} samples from {len(demos.task_specs)}/{n} episodes to {args.out} "
           f"in {time.time() - t0:.0f}s")
@@ -110,7 +110,7 @@ def main(argv=None) -> int:
     sub.add_parser("list", help="tasks, splits, tracks").set_defaults(func=cmd_list)
 
     p = sub.add_parser("run", help="evaluate an agent")
-    p.add_argument("--agent", required=True, help="random | oracle | bc:<checkpoint> | <module>:<Class>")
+    p.add_argument("--agent", required=True, help="random | oracle | adaptive | fixed | bc:<checkpoint> | vbc:<checkpoint> | <module>:<Class>")
     p.add_argument("--split", action="append", choices=list(SPLITS), help="repeatable (default: test)")
     p.add_argument("--all-test", action="store_true", help="all four test splits (plus any --split)")
     p.add_argument("--all-hard", action="store_true", help="hard_test and hard_test_ood (plus any --split)")
@@ -130,6 +130,8 @@ def main(argv=None) -> int:
     p.add_argument("--tasks", nargs="+", choices=TASK_ORDER)
     p.add_argument("--noise", type=float, default=0.5, help="perturbation size (fraction of max step)")
     p.add_argument("--images", action="store_true")
+    p.add_argument("--vision", action="store_true",
+                   help="also record the vision-track inputs of learning/vision.py (every 2nd step)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--student", metavar="CHECKPOINT",
                    help="DAgger: roll out this BC policy and let the oracle label the states it visits "

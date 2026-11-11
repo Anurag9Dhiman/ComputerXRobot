@@ -74,11 +74,15 @@ def _run_spec(spec: dict) -> dict:
 _COLLECT: dict = {}
 
 
-def _init_collector(physics: str, student: str | None, images: bool = False) -> None:
+def _init_collector(physics: str, student: str | None, images: bool = False, vision: bool = False) -> None:
     from environment.computer_env import EnvConfig
 
-    config = (EnvConfig(render_obs=True, obs_image_size=(64, 64), obs_screen_size=(64, 96))
-              if images else EnvConfig(render_obs=False))
+    if vision:
+        config = get_track("vision").env_config()  # the cameras at the resolution agents get
+    elif images:
+        config = EnvConfig(render_obs=True, obs_image_size=(64, 64), obs_screen_size=(64, 96))
+    else:
+        config = EnvConfig(render_obs=False)
     config.physics = physics
     env = ComputerUseEnv(config)
     _COLLECT.update(env=env, student=None)
@@ -91,20 +95,30 @@ def _init_collector(physics: str, student: str | None, images: bool = False) -> 
         _COLLECT["student"] = BCPolicy(student, env.config.max_step, device="cpu")
 
 
-def _collect_specs(specs: list[dict], noise: float = 0.5, seed: int = 0, images: bool = False):
+def _collect_specs(specs: list[dict], noise: float = 0.5, seed: int = 0, images: bool = False,
+                   vision: bool = False):
     from learning.dataset import collect_demonstrations
 
+    observe = record_every = None
+    if vision:
+        from learning.vision import RECORD_EVERY, vision_inputs
+
+        observe, record_every = vision_inputs, RECORD_EVERY
     specs = [EpisodeSpec(**s) for s in specs]
     student = _COLLECT["student"]
     return collect_demonstrations(_COLLECT["env"], [s.make_task() for s in specs], noise=noise, seed=seed,
                                   with_images=images, verbose=False, keep_failures=student is not None,
                                   variations=[s.variation() for s in specs],
-                                  dynamics=[s.hidden_dynamics() for s in specs], student=student)
+                                  dynamics=[s.hidden_dynamics() for s in specs], student=student,
+                                  observe=observe, record_every=record_every or 1)
 
 
 def collect(split: str, per_task: int, tasks=None, noise: float = 0.5, seed: int = 0, images: bool = False,
-            student: str | None = None, workers: int = 1):
+            student: str | None = None, workers: int = 1, vision: bool = False):
     """Demonstrations on a training split (learning/dataset.py).
+
+    With `vision`, every RECORD_EVERY-th step also records the vision-track inputs of
+    learning/vision.py (downsampled cameras, proprioception, instruction, sub-goal).
 
     Without `student`: the oracle with DART-style perturbations, collected sequentially so that
     its perturbation stream, and hence the data file, is reproducible.
@@ -120,9 +134,11 @@ def collect(split: str, per_task: int, tasks=None, noise: float = 0.5, seed: int
         raise ValueError("workers > 1 applies to DAgger collection (student); oracle collection is sequential")
     physics = SPLITS[split].physics
     specs = [s.to_dict() for s in episodes(split, tasks, per_task)]
+    if vision and student:
+        raise ValueError("vision collection records oracle demonstrations only")
     if workers <= 1:
-        _init_collector(physics, student, images)
-        return _collect_specs(specs, noise, seed, images)
+        _init_collector(physics, student, images, vision)
+        return _collect_specs(specs, noise, seed, images, vision)
     ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(workers, initializer=_init_collector, initargs=(physics, student, images)) as pool:
         return Demonstrations.concatenate(pool.map(_collect_specs, [[d] for d in specs], chunksize=1))

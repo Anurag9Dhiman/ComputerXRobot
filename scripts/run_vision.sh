@@ -28,7 +28,7 @@ for s in 0 1 2; do
   [ -f checkpoints/vbcsg_s$s.pt ] || $PY -m learning.vision train --data $DATA --epochs $EPOCHS --seed $s --subgoal \
     --out checkpoints/vbcsg_s$s.pt
   wait
-  ( [ -f results/vbc_s${s}_test_visual.json ] || \
+  ( [ -f results/vbc_s${s}_test_dynamics.json ] || \
       $PY -m benchmark run --agent vbc:checkpoints/vbc_s$s.pt --tag vbc_s$s --all-test --workers $W --out-dir results
     [ -f results/vbcsg_s${s}_test.json ] || \
       $PY -m benchmark run --agent vbc:checkpoints/vbcsg_s$s.pt --tag vbcsg_s$s --track vision_subgoal --split test \

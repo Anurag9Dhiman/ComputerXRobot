@@ -205,6 +205,7 @@ def collect_demonstrations(
     verbose: bool = True,
     variations: list | None = None,
     dynamics: list | None = None,
+    student=None,
 ) -> Demonstrations:
     """Roll out the scripted expert on `tasks` and record (features, expert target) pairs.
 
@@ -212,6 +213,10 @@ def collect_demonstrations(
     perturb_prob  per-step probability of starting a 3-9 step perturbation
     variations    optional SceneVariation per task (environment/variation.py)
     dynamics      optional HiddenDynamics per task (realistic physics; environment/dynamics.py)
+    student       optional policy with reset() and act(obs) (DAgger): its actions are executed
+                  instead of the expert's, and the expert only labels the states the student
+                  visits. Pass keep_failures=True to keep the episodes it fails, which carry
+                  most of the corrections.
     """
     rng = np.random.default_rng(seed)
     expert = ScriptedPolicy(env)
@@ -222,6 +227,8 @@ def collect_demonstrations(
         obs = env.reset(task, variation=variations[i] if variations else None,
                         dynamics=dynamics[i] if dynamics else None)
         expert.reset()
+        if student is not None:
+            student.reset()
         ep_feats, ep_targets, ep_actions, ep_imgs = [], [], [], {k: [] for k in images}
         done = False
         push, push_steps = np.zeros(3), 0
@@ -234,8 +241,11 @@ def collect_demonstrations(
             if push_steps == 0 and rng.random() < perturb_prob:
                 direction = rng.normal(size=3)
                 push, push_steps = direction / np.linalg.norm(direction) * noise * max_step, int(rng.integers(3, 10))
-            executed = action.copy()
-            if push_steps:
+            if student is not None:
+                executed = np.asarray(student.act(obs), float)
+            else:
+                executed = action.copy()
+            if push_steps and student is None:
                 executed[:3] += push * expert.noise_scale
                 push_steps -= 1
             ep_actions.append(normalize_action(executed, max_step))

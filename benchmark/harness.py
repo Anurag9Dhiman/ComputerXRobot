@@ -68,6 +68,64 @@ def _run_spec(spec: dict) -> dict:
     return run_episode(_WORKER["env"], _WORKER["agent"], EpisodeSpec(**spec), _WORKER["track"])
 
 
+# ------------------------------------------------------------ demonstration collection
+_COLLECT: dict = {}
+
+
+def _init_collector(physics: str, student: str | None, images: bool = False) -> None:
+    from environment.computer_env import EnvConfig
+
+    config = (EnvConfig(render_obs=True, obs_image_size=(64, 64), obs_screen_size=(64, 96))
+              if images else EnvConfig(render_obs=False))
+    config.physics = physics
+    env = ComputerUseEnv(config)
+    _COLLECT.update(env=env, student=None)
+    if student:
+        import torch
+
+        from learning.policy import BCPolicy
+
+        torch.set_num_threads(1)
+        _COLLECT["student"] = BCPolicy(student, env.config.max_step, device="cpu")
+
+
+def _collect_specs(specs: list[dict], noise: float = 0.5, seed: int = 0, images: bool = False):
+    from learning.dataset import collect_demonstrations
+
+    specs = [EpisodeSpec(**s) for s in specs]
+    student = _COLLECT["student"]
+    return collect_demonstrations(_COLLECT["env"], [s.make_task() for s in specs], noise=noise, seed=seed,
+                                  with_images=images, verbose=False, keep_failures=student is not None,
+                                  variations=[s.variation() for s in specs],
+                                  dynamics=[s.hidden_dynamics() for s in specs], student=student)
+
+
+def collect(split: str, per_task: int, tasks=None, noise: float = 0.5, seed: int = 0, images: bool = False,
+            student: str | None = None, workers: int = 1):
+    """Demonstrations on a training split (learning/dataset.py).
+
+    Without `student`: the oracle with DART-style perturbations, collected sequentially so that
+    its perturbation stream, and hence the data file, is reproducible.
+    With `student` (a BC checkpoint): DAgger. The student is rolled out, the oracle labels every
+    state it visits and failed episodes are kept. These rollouts are deterministic per episode,
+    so they can be spread over `workers` processes without changing the data.
+    """
+    from learning.dataset import Demonstrations
+
+    if SPLITS[split].content != "train":
+        raise ValueError("demonstrations may only come from training splits (train, hard_train)")
+    if workers > 1 and not student:
+        raise ValueError("workers > 1 applies to DAgger collection (student); oracle collection is sequential")
+    physics = SPLITS[split].physics
+    specs = [s.to_dict() for s in episodes(split, tasks, per_task)]
+    if workers <= 1:
+        _init_collector(physics, student, images)
+        return _collect_specs(specs, noise, seed, images)
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(workers, initializer=_init_collector, initargs=(physics, student, images)) as pool:
+        return Demonstrations.concatenate(pool.map(_collect_specs, [[d] for d in specs], chunksize=1))
+
+
 def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(["git", *args], capture_output=True, text=True, timeout=5,

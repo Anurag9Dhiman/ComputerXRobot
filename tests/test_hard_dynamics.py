@@ -18,6 +18,7 @@ from environment.dynamics import NOMINAL_DYNAMICS, sample_dynamics
 from environment.keyboard_layout import KEYS
 from environment.task_manager import make_task
 from environment.ui_events import CURSOR_GAIN, PhysicalUIBridge
+from learning.dataset import collect_demonstrations
 
 
 @pytest.fixture(scope="module")
@@ -121,6 +122,24 @@ def test_hard_splits_are_deterministic_and_out_of_distribution():
     assert min(d.autorepeat_delay for d in id_) >= 0.45 > 0.35 >= max(d.autorepeat_delay for d in ood)
     assert min(min(d.key_stiffness) for d in ood) >= 1.5 > 1.4 >= max(max(d.key_stiffness) for d in id_)
     assert SPLITS["test"].physics == "nominal" and "dynamics" not in episodes("test", per_task=1)[0].to_dict()
+
+
+def test_dagger_executes_the_student_and_keeps_oracle_labels(real_env):
+    class Frozen:  # a student that never moves
+        def reset(self):
+            self.calls = 0
+
+        def act(self, obs):
+            self.calls += 1
+            return np.zeros(4)
+
+    student = Frozen()
+    demos = collect_demonstrations(real_env, [make_task("type_key", "a")], verbose=False, keep_failures=True,
+                                   student=student)
+    assert not real_env.status.success and len(demos.task_specs) == 1  # failed episode kept
+    assert len(demos) == student.calls == real_env.metrics()["steps"]
+    assert np.allclose(demos.actions, 0.0)  # the student's actions were executed ...
+    assert np.linalg.norm(demos.targets[-1, :3]) > 1.0  # ... and the oracle still points to the key (cm)
 
 
 @pytest.mark.parametrize("split", HARD_TEST_SPLITS)

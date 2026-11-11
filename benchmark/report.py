@@ -20,7 +20,10 @@ TABLES = ("splits", "hard", "tasks", "levels", "errors")
 
 
 def load(paths) -> list[dict]:
-    return [json.loads(Path(p).read_text()) for p in paths]
+    """Episode-result files among `paths`; others, such as the dynamics-prediction track's
+    results/world_model.json, are skipped so that `results/*.json` works."""
+    results = [json.loads(Path(p).read_text()) for p in paths]
+    return [r for r in results if "per_task" in r]
 
 
 def _label(r: dict) -> str:

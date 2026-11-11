@@ -64,26 +64,20 @@ def cmd_run(args) -> int:
 
 
 def cmd_collect(args) -> int:
-    from benchmark.suite import episodes
-    from environment.computer_env import ComputerUseEnv, EnvConfig
-    from learning.dataset import collect_demonstrations
+    from benchmark.harness import collect
 
     if SPLITS[args.split].content != "train":
         sys.exit("demonstrations may only come from training splits (train, hard_train)")
-    specs = episodes(args.split, args.tasks, args.per_task)
-    config = (EnvConfig(render_obs=True, obs_image_size=(64, 64), obs_screen_size=(64, 96))
-              if args.images else EnvConfig(render_obs=False))
-    config.physics = SPLITS[args.split].physics
-    env = ComputerUseEnv(config)
+    if args.workers > 1 and not args.student:
+        sys.exit("--workers applies to DAgger collection (--student); oracle collection is sequential")
+    n = len(TASK_ORDER if not args.tasks else args.tasks) * args.per_task
+    who = f"student {args.student} labelled by the oracle (DAgger)" if args.student else f"oracle, noise {args.noise}"
+    print(f"Collecting {n} episodes on {args.split} ({SPLITS[args.split].physics} physics, {who})")
     t0 = time.time()
-    print(f"Collecting {len(specs)} oracle demonstrations on {args.split} ({config.physics} physics, "
-          f"noise {args.noise})")
-    demos = collect_demonstrations(env, [s.make_task() for s in specs], noise=args.noise, seed=args.seed,
-                                   with_images=args.images, verbose=False,
-                                   variations=[s.variation() for s in specs],
-                                   dynamics=[s.hidden_dynamics() for s in specs])
+    demos = collect(args.split, args.per_task, args.tasks, noise=args.noise, seed=args.seed, images=args.images,
+                    student=args.student, workers=args.workers)
     demos.save(args.out)
-    print(f"saved {len(demos)} samples from {len(demos.task_specs)}/{len(specs)} episodes to {args.out} "
+    print(f"saved {len(demos)} samples from {len(demos.task_specs)}/{n} episodes to {args.out} "
           f"in {time.time() - t0:.0f}s")
     return 0
 
@@ -126,6 +120,10 @@ def main(argv=None) -> int:
     p.add_argument("--noise", type=float, default=0.5, help="perturbation size (fraction of max step)")
     p.add_argument("--images", action="store_true")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--student", metavar="CHECKPOINT",
+                   help="DAgger: roll out this BC policy and let the oracle label the states it visits "
+                        "(failed episodes are kept)")
+    p.add_argument("--workers", type=int, default=1, help="parallel processes for DAgger collection")
     p.add_argument("--out", default="data/train.npz")
     p.set_defaults(func=cmd_collect)
 

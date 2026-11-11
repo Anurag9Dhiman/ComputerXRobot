@@ -20,7 +20,7 @@ the instruction's characters; an MLP head. Labels and decoding are those of the 
 policy (learning/dataset.py): the expert's waypoint offset (cm) and finger command. Training
 augments every camera with random shifts (up to 4 px) and brightness / contrast jitter.
 
-    python -m benchmark collect --split train --per-task 40 --vision --out data/vision_train.npz
+    python -m benchmark collect --split train --per-task 100 --vision --out data/vision_train.npz
     python -m learning.vision train --data data/vision_train.npz --seed 0 --out checkpoints/vbc_s0.pt
     python -m benchmark run --agent vbc:checkpoints/vbc_s0.pt --all-test --workers 8
 """

@@ -1,12 +1,12 @@
 #!/bin/sh
 # Vision-track baselines (learning/vision.py): behaviour cloning from pixels (vision-bc) and the
 # diagnostic variant that also gets the next sub-goal (vision-bc-subgoal, vision_subgoal track).
-#   PY=python WORKERS=7 sh scripts/run_vision.sh
+#   PY=python WORKERS=6 sh scripts/run_vision.sh
 # Steps whose outputs exist are skipped, so an interrupted run can be resumed.
 set -e
 PY=${PY:-python}
-W=${WORKERS:-7}
-N=${PER_TASK:-40}
+W=${WORKERS:-6}
+N=${PER_TASK:-100}
 EPOCHS=${EPOCHS:-30}
 TASKS="type_key open_app close_window type_text clear_text open_file search open_result write_note"
 

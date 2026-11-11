@@ -7,7 +7,7 @@ set -e
 PY=${PY:-python}
 W=${WORKERS:-6}
 N=${PER_TASK:-100}
-EPOCHS=${EPOCHS:-30}
+EPOCHS=${EPOCHS:-8}
 TASKS="type_key open_app close_window type_text clear_text open_file search open_result write_note"
 
 # 1. Oracle demonstrations with the vision-track inputs: one process (and seed) per task.

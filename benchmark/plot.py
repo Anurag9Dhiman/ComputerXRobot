@@ -2,6 +2,7 @@
 
     python -m benchmark.plot results/*.json --agent bc --out docs/benchmark_results.png
     python -m benchmark.plot results/*.json --hard --out docs/hard_results.png
+    python -m benchmark.plot results/*.json --vision --out docs/vision_results.png
 
 Standard splits. Left: Bench Score of the learned agent on each test split (mean over
 training seeds, error bars = std), with the privileged oracle as a labelled reference line and
@@ -180,15 +181,77 @@ def plot_hard(results: list[dict], out: str) -> None:
     print(f"saved {out}")
 
 
+VISION_AGENTS = (("bc", "state"), ("vision-bc-subgoal", "vision_subgoal"), ("vision-bc", "vision"))
+
+
+def plot_vision(results: list[dict], out: str) -> None:
+    """Left: Bench Score per test split, state-track bc against vision-bc (same demonstrations).
+    Right: success per task on `test` for bc (state, sub-goal given), vision-bc-subgoal (pixels
+    plus sub-goal; diagnostic) and vision-bc (pixels only)."""
+    from benchmark.suite import TASK_ORDER
+
+    plt = _pyplot()
+    results = [r for r in results if "summary" in r]
+    present = [(a, t) for a, t in VISION_AGENTS if any(r["agent_name"] == a and r["track"] == t for r in results)]
+    color = {a: CATEGORICAL[i] for i, (a, _) in enumerate(VISION_AGENTS)}
+    label = {"bc": "bc (state track)", "vision-bc-subgoal": "vision-bc + sub-goal (diagnostic)",
+             "vision-bc": "vision-bc (vision track)"}
+
+    def runs(agent, track, split):
+        return [r for r in results if r["agent_name"] == agent and r["track"] == track and r["split"] == split]
+
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(12, 4.4), gridspec_kw={"width_ratios": [1, 1.6]})
+    split_agents = [(a, t) for a, t in present if a != "vision-bc-subgoal"]
+    width = 0.8 / max(len(split_agents), 1)
+    for i, (a, t) in enumerate(split_agents):
+        xs, means, stds = [], [], []
+        for j, split in enumerate(TEST_SPLITS):
+            v = [100 * r["summary"]["score"] for r in runs(a, t, split)]
+            if v:
+                xs.append(j + (i - (len(split_agents) - 1) / 2) * width)
+                means.append(np.mean(v))
+                stds.append(np.std(v))
+        ax.bar(xs, means, width=width, color=color[a], edgecolor=SURFACE, linewidth=1.5, zorder=3)
+        ax.errorbar(xs, means, yerr=stds, fmt="none", ecolor=INK, elinewidth=1, capsize=2.5, zorder=4)
+        for x, m, sd in zip(xs, means, stds):
+            ax.text(x, m + sd + 1.5, f"{m:.0f}", ha="center", va="bottom", fontsize=8, color=INK_2)
+    ax.set_xticks(range(len(TEST_SPLITS)), TEST_SPLITS)
+    ax.set_ylim(0, 112)
+    ax.set_ylabel("Bench Score (%)")
+    ax.set_title("Bench Score per test split, mean ± std over 3 seeds", fontsize=10.5, loc="left")
+
+    width = 0.8 / max(len(present), 1)
+    for i, (a, t) in enumerate(present):
+        rs = runs(a, t, "test")
+        vals = [100 * np.mean([r["summary"]["by_task"][task]["success"] for r in rs]) for task in TASK_ORDER]
+        bx.bar(np.arange(len(TASK_ORDER)) + (i - (len(present) - 1) / 2) * width, vals, width=width,
+               color=color[a], edgecolor=SURFACE, linewidth=1.2, label=label[a], zorder=3)
+    bx.set_xticks(range(len(TASK_ORDER)), [t.replace("_", "\n") for t in TASK_ORDER], fontsize=8.5)
+    bx.set_ylim(0, 105)
+    bx.set_ylabel("Success (%)")
+    bx.set_title("Success per task on test (mean of 3 seeds)", fontsize=10.5, loc="left")
+    for a in (ax, bx):
+        a.grid(axis="y", color=GRID, lw=0.8, zorder=0)
+    _style(ax, bx)
+    fig.legend(*bx.get_legend_handles_labels(), ncols=len(present), frameon=False, loc="upper center",
+               bbox_to_anchor=(0.5, 1.0), fontsize=9, handlelength=1.2, columnspacing=1.4)
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    fig.savefig(out, dpi=160)
+    print(f"saved {out}")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("results", nargs="+")
     p.add_argument("--agent", default="bc")
     p.add_argument("--hard", action="store_true", help="hard-tier figure (all learned agents, dynamics ablation)")
+    p.add_argument("--vision", action="store_true", help="vision-track figure (bc, vision-bc, vision-bc-subgoal)")
     p.add_argument("--out", default="docs/benchmark_results.png")
     args = p.parse_args(argv)
     if args.hard:
         plot_hard(load(args.results), args.out)
+    elif args.vision:
+        plot_vision(load(args.results), args.out)
     else:
         plot(load(args.results), args.agent, args.out)
     return 0

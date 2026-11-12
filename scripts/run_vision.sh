@@ -3,11 +3,14 @@
 # diagnostic variant that also gets the next sub-goal (vision-bc-subgoal, vision_subgoal track).
 #   PY=python WORKERS=6 sh scripts/run_vision.sh
 # Steps whose outputs exist are skipped, so an interrupted run can be resumed.
+# Cost: 100 demonstrations per task give 89k samples. One epoch takes ~4 min on a laptop GPU
+# (Apple M-series, MPS), so 30 epochs need a workstation or server GPU for 6 models. 8 epochs
+# (~5k updates) leave the policy under-trained: 3-9 mm position error near the goal.
 set -e
 PY=${PY:-python}
 W=${WORKERS:-6}
 N=${PER_TASK:-100}
-EPOCHS=${EPOCHS:-8}
+EPOCHS=${EPOCHS:-30}
 TASKS="type_key open_app close_window type_text clear_text open_file search open_result write_note"
 
 # 1. Oracle demonstrations with the vision-track inputs: one process (and seed) per task.

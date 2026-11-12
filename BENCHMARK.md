@@ -202,6 +202,7 @@ python -m benchmark.world_model evaluate --out results/world_model.json
 |---|---|---|
 | `state` | proprioception (`qpos`, `qvel`, `tool_pos`, `tool_target`, `finger`); positions of the mouse, the needed mouse button and the keyboard; cursor position; key / button / palm contact flags; the instruction; and the task's **next sub-goal** (character to type, or widget to click with which button and its screen position) | isolates control; an upper-bound setting for learning |
 | `vision` | four RGB cameras: `robot_cam` 240×320, `keyboard_cam` 256×512, `mouse_cam` 320×320, `screen_cam` 400×640; proprioception; palm touch; the instruction text. **No** positions, cursor or sub-goals | the full problem: read keys and screen, find the cursor, plan |
+| `vision_subgoal` | diagnostic, not a benchmark track: the `vision` track plus the state track's next sub-goal (what to type or click next, which button, where the target is on screen) | removes planning and screen reading but keeps perception for control, so comparing it with `vision` shows which one a vision policy lacks |
 
 The harness removes everything a track does not allow before observations reach the agent.
 The scripted oracle reads the simulator directly. It is reported as a privileged reference,
@@ -743,7 +744,15 @@ README).
   switch-to-switch spring variation, OS double-click and auto-repeat settings). They are not
   calibrated to a particular robot or computer.
 - **The `state` track hands over the next sub-goal.** It measures control, not planning or
-  perception. The `vision` track has no learned baseline yet and is the open challenge.
+  perception. The `vision` track has no learned result yet and is the open challenge.
+- **Vision baseline: pipeline in place, results pending.**
+  - What exists: behaviour cloning from pixels (`learning/vision.py`, agent spec
+    `vbc:<checkpoint>`) and its `vision_subgoal` diagnostic variant, with 100 oracle
+    demonstrations per task (89k samples, `collect --vision`), via `scripts/run_vision.sh`.
+  - A first model trained for 8 epochs (~5k updates) is under-trained: on its own training data
+    its hand target is 3–9 mm off near the goal, where a key press needs about 3 mm, and it
+    solved 0 of 18 `test` episodes. That is a compute limit, not a result.
+  - The script's default of 30 epochs needs a server GPU.
 - **Content set sizes:** `close_window` has one test item and `open_result` two. Their test
   episodes differ mainly in scene, which the per-task tables make visible.
 - **Versioning:** any change to tasks, splits, scene ranges or success checks bumps the major

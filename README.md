@@ -107,7 +107,7 @@ agent are in **[BENCHMARK.md](BENCHMARK.md)**.
 | Dynamics-prediction (world-model) track | ✅ `benchmark/world_model.py` |
 | DAgger baselines (privileged oracle → student) and single-factor dynamics ablation | ✅ `scripts/run_hard_dagger.sh`, `benchmark/ablation.py` |
 | Non-privileged expert with online system identification (solvability of the hard tier from observations) | ✅ `learning/adaptive.py`, `scripts/run_adaptive.sh` |
-| Vision-track learned agent | ⏳ the open challenge; data pipeline and CNN encoder exist (`--images`), no baseline yet |
+| Vision-track learned agent | ⏳ pipeline ready (`learning/vision.py`, `scripts/run_vision.sh`, `vision_subgoal` diagnostic track); a full training run needs a server GPU, so no result yet |
 | Gymnasium API: registered envs, state/pixel observations, seeding, vector envs, render modes | ✅ `environment/gym_env.py` |
 | RL (PPO/SAC) | ⏳ Gymnasium env and shaped reward are ready; no RL trainer yet |
 

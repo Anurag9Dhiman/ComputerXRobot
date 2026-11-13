@@ -5,9 +5,9 @@
     python -m benchmark.plot results/*.json --vision --out docs/vision_results.png
 
 Standard splits. Left: Bench Score of the learned agent on each test split (mean over
-training seeds, error bars = std), with the privileged oracle as a labelled reference line and
-the random agent's best score in the title. Right: its success per difficulty level on each
-split.
+training seeds; error bars: 95% bootstrap interval over seeds and episodes, benchmark/stats.py),
+with the privileged oracle as a labelled reference line and the random agent's best score in
+the title. Right: its success per difficulty level on each split.
 
 Hard tier (--hard). Left: Bench Score of every learned agent on hard_test and hard_test_ood.
 Right: the dynamics ablation (benchmark/ablation.py), one row per condition. Each agent keeps
@@ -22,6 +22,7 @@ from collections import defaultdict
 import numpy as np
 
 from benchmark.report import load
+from benchmark.stats import aggregate
 from benchmark.suite import TEST_SPLITS
 
 SURFACE = "#fcfcfb"
@@ -32,8 +33,8 @@ SERIES = "#2a78d6"  # reference palette, categorical slot 1 (validated)
 LEVEL_RAMP = ["#a9cdf5", "#6aa6eb", "#2a78d6", "#18519a"]  # one hue, light -> dark
 # Hard-tier agents in a fixed order, one categorical slot each (reference palette, validated;
 # slots 3-5 are below 3:1 on the surface, so every value is also labelled).
-HARD_AGENTS = ("bc-nominal", "bc", "bc-history", "bc-dagger", "bc-history-dagger")
-CATEGORICAL = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
+HARD_AGENTS = ("bc-nominal", "bc", "bc-history", "bc-dagger", "bc-history-dagger", "bc-gru", "bc-gru-dagger")
+CATEGORICAL = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6")
 
 
 def _scores(results, agent):
@@ -45,6 +46,26 @@ def _scores(results, agent):
             for lv, v in r["summary"]["by_level"].items():
                 levels[r["split"]][lv].append(v)
     return by_split, levels
+
+
+def _mean_ci(runs: list[dict]) -> tuple[float, float, float]:
+    """Mean score (%) of an agent's runs on one split and its 95% interval (benchmark/stats.py)."""
+    a = aggregate(runs)
+    return 100 * a["mean"], 100 * a["mean_ci"][0], 100 * a["mean_ci"][1]
+
+
+def _bars_with_ci(ax, xs, stats, color, width, label=None, inside=False):
+    """Bars at the means with asymmetric 95% interval whiskers; values above (or inside) the bars."""
+    means = np.array([m for m, _, _ in stats])
+    err = np.array([[m - lo for m, lo, _ in stats], [hi - m for m, _, hi in stats]])
+    ax.bar(xs, means, width=width, color=color, edgecolor=SURFACE, linewidth=1.5, label=label, zorder=3)
+    ax.errorbar(xs, means, yerr=err, fmt="none", ecolor=INK, elinewidth=1, capsize=2.5, zorder=4)
+    for x, (m, _, hi) in zip(xs, stats):
+        if inside:
+            ax.text(x, m / 2, f"{m:.0f}", ha="center", va="center", fontsize=10, color="white", fontweight="bold")
+        else:  # above the whisker, but clear of the reference line at 100
+            y = hi + 1.5
+            ax.text(x, 102.5 if 95 < y < 102.5 else y, f"{m:.0f}", ha="center", va="bottom", fontsize=8, color=INK_2)
 
 
 def _pyplot():
@@ -75,12 +96,10 @@ def plot(results: list[dict], agent: str, out: str) -> None:
 
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(11, 3.8), gridspec_kw={"width_ratios": [1, 1.35]})
     x = np.arange(len(splits))
-    mean = np.array([100 * np.mean(by_split[s]) for s in splits])
-    std = np.array([100 * np.std(by_split[s]) for s in splits])
-    ax.bar(x, mean, width=0.55, color=SERIES, zorder=3)
-    ax.errorbar(x, mean, yerr=std, fmt="none", ecolor=INK, elinewidth=1, capsize=3, zorder=4)
-    for xi, m in zip(x, mean):  # values inside the bars, clear of the error bars and reference lines
-        ax.text(xi, m / 2, f"{m:.0f}", ha="center", va="center", fontsize=10, color="white", fontweight="bold")
+    runs = {s: [r for r in results if r["agent_name"] == agent and r["split"] == s] for s in splits}
+    # Values inside the bars, clear of the whiskers and the reference line.
+    _bars_with_ci(ax, x, [_mean_ci(runs[s]) for s in splits], SERIES, 0.55, inside=True)
+    n_runs = max(len(v) for v in runs.values())
     oracle = 100 * np.array(refs["oracle"])
     if np.all(np.isfinite(oracle)):
         ax.plot([-0.45, len(splits) - 0.55], [oracle.mean()] * 2, "--", color=INK_2, lw=1.2, zorder=2)
@@ -91,7 +110,8 @@ def plot(results: list[dict], agent: str, out: str) -> None:
     ax.set_xticks(x, splits)
     ax.set_ylim(0, 112)
     ax.set_ylabel("Bench Score (%)")
-    ax.set_title(f"{agent}, state track: Bench Score per split{random_note}", fontsize=10.5, loc="left")
+    ax.set_title(f"{agent}, state track: Bench Score per split\nmean of {n_runs} seeds, 95% CI{random_note}",
+                 fontsize=10.5, loc="left")
 
     lv_names = sorted({lv for s in splits for lv in levels[s]})
     width = 0.8 / max(len(lv_names), 1)
@@ -102,7 +122,7 @@ def plot(results: list[dict], agent: str, out: str) -> None:
     bx.set_xticks(x, splits)
     bx.set_ylim(0, 105)
     bx.set_ylabel("Success (%)")
-    bx.set_title(f"{agent}: success per difficulty level", fontsize=10.5, loc="left")
+    bx.set_title(f"{agent}: success per difficulty level\n", fontsize=10.5, loc="left")
     bx.legend(ncols=len(lv_names), frameon=False, loc="lower right", fontsize=8.5, bbox_to_anchor=(1, 1.0),
               handlelength=1.2, columnspacing=1.0, borderaxespad=0.2)
 
@@ -129,18 +149,16 @@ def plot_hard(results: list[dict], out: str) -> None:
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(12, 4.6), gridspec_kw={"width_ratios": [1, 1.15]})
     splits = [s for s in HARD_TEST_SPLITS if any(r["split"] == s for r in evals)]
     width = 0.8 / max(len(agents), 1)
+    n_runs = 0
     for i, a in enumerate(agents):
-        xs, means, stds = [], [], []
+        xs, stats = [], []
         for j, s in enumerate(splits):
-            v = [100 * r["summary"]["score"] for r in evals if r["agent_name"] == a and r["split"] == s]
-            if v:
+            rs = [r for r in evals if r["agent_name"] == a and r["split"] == s]
+            if rs:
                 xs.append(j + (i - (len(agents) - 1) / 2) * width)
-                means.append(np.mean(v))
-                stds.append(np.std(v))
-        ax.bar(xs, means, width=width, color=color[a], edgecolor=SURFACE, linewidth=1.5, label=a, zorder=3)
-        ax.errorbar(xs, means, yerr=stds, fmt="none", ecolor=INK, elinewidth=1, capsize=2.5, zorder=4)
-        for x, m, sd in zip(xs, means, stds):
-            ax.text(x, m + sd + 1.5, f"{m:.0f}", ha="center", va="bottom", fontsize=8, color=INK_2)
+                stats.append(_mean_ci(rs))
+                n_runs = max(n_runs, len(rs))
+        _bars_with_ci(ax, xs, stats, color[a], width, label=a)
     ax.plot([-0.45, len(splits) - 0.55], [100, 100], "--", color=INK_2, lw=1.2, zorder=2)
     # The non-privileged adaptive expert sits on the oracle's line; name it there.
     adaptive = [100 * r["summary"]["score"] for r in evals if r["agent_name"] == "adaptive-expert"]
@@ -150,7 +168,7 @@ def plot_hard(results: list[dict], out: str) -> None:
     ax.set_ylim(0, 112)
     ax.set_ylabel("Bench Score (%)")
     note = f" (random ≤ {100 * max(random):.1f})" if random else ""
-    ax.set_title(f"Hard tier: Bench Score, mean ± std over 3 seeds{note}", fontsize=10.5, loc="left")
+    ax.set_title(f"Hard tier: Bench Score, mean of {n_runs} seeds, 95% CI{note}", fontsize=10.5, loc="left")
     ax.grid(axis="y", color=GRID, lw=0.8, zorder=0)
 
     # Dot plot of seed means, one sub-row per agent so dots never overlap. Values and seed std
@@ -204,21 +222,16 @@ def plot_vision(results: list[dict], out: str) -> None:
     split_agents = [(a, t) for a, t in present if a != "vision-bc-subgoal"]
     width = 0.8 / max(len(split_agents), 1)
     for i, (a, t) in enumerate(split_agents):
-        xs, means, stds = [], [], []
+        xs, stats = [], []
         for j, split in enumerate(TEST_SPLITS):
-            v = [100 * r["summary"]["score"] for r in runs(a, t, split)]
-            if v:
+            if runs(a, t, split):
                 xs.append(j + (i - (len(split_agents) - 1) / 2) * width)
-                means.append(np.mean(v))
-                stds.append(np.std(v))
-        ax.bar(xs, means, width=width, color=color[a], edgecolor=SURFACE, linewidth=1.5, zorder=3)
-        ax.errorbar(xs, means, yerr=stds, fmt="none", ecolor=INK, elinewidth=1, capsize=2.5, zorder=4)
-        for x, m, sd in zip(xs, means, stds):
-            ax.text(x, m + sd + 1.5, f"{m:.0f}", ha="center", va="bottom", fontsize=8, color=INK_2)
+                stats.append(_mean_ci(runs(a, t, split)))
+        _bars_with_ci(ax, xs, stats, color[a], width)
     ax.set_xticks(range(len(TEST_SPLITS)), TEST_SPLITS)
     ax.set_ylim(0, 112)
     ax.set_ylabel("Bench Score (%)")
-    ax.set_title("Bench Score per test split, mean ± std over 3 seeds", fontsize=10.5, loc="left")
+    ax.set_title("Bench Score per test split, mean over seeds, 95% CI", fontsize=10.5, loc="left")
 
     width = 0.8 / max(len(present), 1)
     for i, (a, t) in enumerate(present):
@@ -229,7 +242,7 @@ def plot_vision(results: list[dict], out: str) -> None:
     bx.set_xticks(range(len(TASK_ORDER)), [t.replace("_", "\n") for t in TASK_ORDER], fontsize=8.5)
     bx.set_ylim(0, 105)
     bx.set_ylabel("Success (%)")
-    bx.set_title("Success per task on test (mean of 3 seeds)", fontsize=10.5, loc="left")
+    bx.set_title("Success per task on test (mean over seeds)", fontsize=10.5, loc="left")
     for a in (ax, bx):
         a.grid(axis="y", color=GRID, lw=0.8, zorder=0)
     _style(ax, bx)

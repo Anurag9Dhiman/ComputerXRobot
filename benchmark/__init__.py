@@ -7,7 +7,10 @@ under scene shifts it was not trained on. See BENCHMARK.md for the protocol.
     python -m benchmark list                                   # tasks, splits, tracks
     python -m benchmark run --agent oracle --split test        # evaluate an agent
     python -m benchmark report results/*.json                  # tables (Markdown / LaTeX)
+    python -m benchmark.world_model evaluate                   # dynamics-prediction track
 """
 
 BENCHMARK_NAME = "ComputerXRobot-Bench"
-BENCHMARK_VERSION = "1.0.0"
+# 1.1.0 adds the hard tier (realistic physics, hidden dynamics) and the dynamics-prediction
+# track; the 1.0.0 splits, episodes and results are unchanged.
+BENCHMARK_VERSION = "1.1.0"

@@ -16,7 +16,8 @@ import numpy as np
 import torch
 from torch import nn
 
-from learning.dataset import FEATURE_DIM, Demonstrations, decode_target, low_dim_features
+from learning.dataset import (FEATURE_DIM, Demonstrations, HistoryBuffer, decode_target, low_dim_features,
+                              normalize_action, stack_history)
 
 
 def pick_device(device: str = "auto") -> torch.device:
@@ -76,11 +77,14 @@ def train_bc(
     verbose: bool = True,
     hidden: int = 256,
     loss_beta: float = 0.05,
+    history_steps: int = 0,
 ) -> dict:
     """Fit a BCNetwork to demonstrations; returns the training history.
 
-    hidden     width of the MLP's three hidden layers
-    loss_beta  smooth-L1 transition point (label units); smaller is closer to pure L1
+    hidden         width of the MLP's three hidden layers
+    loss_beta      smooth-L1 transition point (label units); smaller is closer to pure L1
+    history_steps  also condition on the previous H feature vectors and commanded actions,
+                   so the policy can infer hidden dynamics (latency, gains) in context
     """
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
@@ -96,11 +100,16 @@ def train_bc(
     is_val = np.isin(demos.episode, val_eps)
     train_idx, val_idx = np.flatnonzero(~is_val), np.flatnonzero(is_val)
 
-    feats = torch.from_numpy(demos.features).to(dev)
+    inputs = demos.features
+    if history_steps:
+        if demos.actions is None:
+            raise ValueError("history needs demonstrations with recorded actions; re-collect them")
+        inputs = stack_history(demos.features, demos.actions, demos.episode, history_steps)
+    feats = torch.from_numpy(inputs).to(dev)
     targets = torch.from_numpy(demos.targets).to(dev)
     imgs = {k: torch.from_numpy(demos.images[k]).to(dev) for k in image_keys}
 
-    net = BCNetwork(demos.features.shape[1], image_keys, hidden=hidden).to(dev)
+    net = BCNetwork(inputs.shape[1], image_keys, hidden=hidden).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
     # Smooth L1 keeps millimetre precision near the goal; the finger command (range 0-0.75)
@@ -139,7 +148,8 @@ def train_bc(
     torch.save(
         {
             "state_dict": net.state_dict(),
-            "feature_dim": demos.features.shape[1],
+            "feature_dim": inputs.shape[1],
+            "history_steps": history_steps,
             "hidden": hidden,
             "loss_beta": loss_beta,
             "image_keys": image_keys,
@@ -170,13 +180,17 @@ class BCPolicy:
         self.net.eval()
         self.max_step = max_step
         self.skill = "learned"
+        self.history_steps = int(ckpt.get("history_steps", 0))
+        self.buffer = HistoryBuffer(self.history_steps)
 
     def reset(self) -> None:
-        pass
+        self.buffer.reset()
 
     @torch.no_grad()
     def act(self, obs: dict) -> np.ndarray:
-        feats = torch.from_numpy(low_dim_features(obs)).unsqueeze(0).to(self.device)
+        f = low_dim_features(obs)
+        x = self.buffer.inputs(f) if self.history_steps else f
+        feats = torch.from_numpy(x).unsqueeze(0).to(self.device)
         images = {}
         for k in self.image_keys:
             if k not in obs:
@@ -185,4 +199,6 @@ class BCPolicy:
                 raise ValueError(f"{k}: policy trained on {self.image_shapes[k]}, got {obs[k].shape}")
             images[k] = torch.from_numpy(np.ascontiguousarray(obs[k])).unsqueeze(0).to(self.device)
         target = self.net(feats, images)[0].cpu().numpy()
-        return decode_target(target, self.max_step)
+        action = decode_target(target, self.max_step)
+        self.buffer.push(f, normalize_action(action, self.max_step))
+        return action

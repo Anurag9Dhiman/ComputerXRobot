@@ -11,6 +11,12 @@
             keys, cursor or widgets and no sub-goals: the agent has to read the keys and the
             screen, find the cursor, and plan the sequence of actions itself.
 
+    vision_subgoal  Diagnostic, not a benchmark track: the vision track plus the next
+            sub-goal of the state track (expected_char, click_target, click_button,
+            click_target_px). It removes planning and screen reading but keeps perception
+            for control, so comparing it with the vision track shows which one a vision
+            policy is missing.
+
 The harness removes everything a track does not allow before observations reach the agent.
 Results are only comparable within a track.
 """
@@ -51,6 +57,13 @@ TRACKS: dict[str, Track] = {
         "vision",
         "camera images + proprioception + palm touch + instruction text; no positions, no sub-goals",
         keys=PROPRIOCEPTION + ("instruction", "palm_on_mouse") + VISION_CAMERAS,
+        cameras=VISION_CAMERAS,
+    ),
+    "vision_subgoal": Track(
+        "vision_subgoal",
+        "diagnostic: the vision track plus the next sub-goal (planning removed, perception kept)",
+        keys=PROPRIOCEPTION + ("instruction", "palm_on_mouse") + VISION_CAMERAS +
+             ("expected_char", "click_target", "click_button", "click_target_px"),
         cameras=VISION_CAMERAS,
     ),
 }

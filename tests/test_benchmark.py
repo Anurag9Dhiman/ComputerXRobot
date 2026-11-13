@@ -114,6 +114,7 @@ def test_report_tables_render():
                             "summary": summarize(records)})
     md = report(results, "splits", fmt="md")
     assert "oracle (privileged)" in md and "| random | state | 0.0 ± 0.0" in md
+    assert "hard" not in report(results, "hard").split("\n")[2]  # no hard results: header only
     assert r"\begin{tabular}" in report(results, "tasks", "test", fmt="latex")
     for table in ("levels", "errors"):
         assert report(results, table, "test_visual")

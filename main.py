@@ -346,7 +346,7 @@ def cmd_train(args) -> int:
     print(f"Training BC on {len(demos)} samples from {len(demos.task_specs)} episodes")
     train_bc(demos, args.out, epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
              use_images=args.images, device=args.device, seed=args.seed, hidden=args.hidden,
-             loss_beta=args.loss_beta)
+             loss_beta=args.loss_beta, history_steps=args.history)
     return 0
 
 
@@ -438,6 +438,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--hidden", type=int, default=256, help="MLP width")
     p.add_argument("--loss-beta", type=float, default=0.05, help="smooth-L1 beta (smaller = closer to L1)")
+    p.add_argument("--history", type=int, default=0,
+                   help="condition on the last H observations and actions (hidden-dynamics inference)")
     p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("evaluate", help="success rate, time, failed presses/clicks, collisions")

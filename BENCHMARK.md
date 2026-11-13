@@ -122,6 +122,22 @@ particular world responds, from the consequences of its own actions, within the 
 | Keyboard auto-repeat | a key held too long types again at 30 Hz | after 0.45–0.6 s | after 0.25–0.35 s |
 | Double-click time | files open only on a double-click, two clicks within this window and 4 px | 0.4–0.5 s | 0.28–0.33 s |
 
+**Where the ranges come from.** They are not calibrated to one robot or computer. Where
+published measurements or platform defaults exist, the ranges are anchored to them; the rest
+are stated as assumptions.
+
+| Parameter | Reference values | How the ranges relate |
+|---|---|---|
+| Control latency | A UR5 arm's motor signals respond 2–3 packets (16–24 ms) after a command sent over wired Ethernet. Over Wi-Fi, packet inter-arrival times ranged 0.2–127 ms, and an injected action-update delay of 80 ms on average degraded learning (Mahmood et al., 2018) | `real_id` (0–20 ms): a wired arm; `real_ood` (40–80 ms): a wireless link or slow policy inference |
+| Display latency | Mouse-click-to-screen latency of a laptop, mouse and monitor: 40–85 ms (Schmid & Wimmer, 2021). Most end-to-end latency comes from the display side (Casiez et al., 2017). A lag of 75 ms measurably slows pointing (MacKenzie & Ware, 1993) | The simulated computer is otherwise instantaneous: `real_id` (0–40 ms) is a fast setup; `real_ood` (60–100 ms) is an ordinary desktop |
+| Actuation and observation noise | Pose repeatability (ISO 9283): ±0.1 mm for the Franka Emika Panda, ±0.03 mm for the UR5e (manufacturer datasheets) | `real_id` is at most a few times that repeatability; `real_ood` (0.3–0.8 mm) is several times more |
+| Gravity compensation | Assumption: an error of up to 15% in the arm's mass model | – |
+| Pointer acceleration | Desktop operating systems' default transfer functions raise the cursor gain with device speed. Compared with a constant gain, they improve pointing performance by up to 24% (Casiez & Roussel, 2011) | Gain × (1 + a · min(v / 0.15 m/s, 2)): at speed, up to 2× (`real_id`) or 2.6–3.4× (`real_ood`). The magnitudes are an assumption |
+| Mouse rotation | Optical sensors report motion in their own frame, so the effect follows from the geometry. How far a mouse sits rotated is an assumption | – |
+| Key spring force and depth | Cherry MX: 45 cN (Red), 60 cN (Black), 70 cN (Green) actuation force; actuation at 2.0 mm of 4.0 mm travel (manufacturer datasheets), with a tolerance of about ±0.6 mm | Force multipliers ×0.8–1.4 around nominal (`real_id`) and ×1.5–1.9 (`real_ood`, from the Red-to-Green ratio of 1.56 upward). Depth 50–70% of travel (`real_id`) and 75–85% (`real_ood`, past the tolerance) |
+| Keyboard auto-repeat | Windows offers four delays from about 250 ms to about 1 s (Win32 `SPI_GETKEYBOARDDELAY`); the X server default is 660 ms at 25 Hz | `real_id` (0.45–0.6 s): around the defaults; `real_ood` (0.25–0.35 s): the shortest settings |
+| Double-click time | Windows default 500 ms (Win32 `SetDoubleClickTime`); GTK/GNOME default 400 ms (250 ms before 2016) | `real_id` (0.4–0.5 s): the defaults; `real_ood` (0.28–0.33 s): a fast user setting |
+
 The realistic profile (`EnvConfig(physics="realistic")`) also changes the scene:
 
 - the mouse rotates on its pad (a hinge with friction);
@@ -739,10 +755,12 @@ README).
   waypoint labels and optionally 64×64 images (`learning/dataset.py`). They contain no human
   data or personal information. With `--student`, it produces DAgger data: student
   rollouts labelled by the oracle.
-- **Hidden dynamics are modelled, not measured.** Their ranges are plausible for real
-  hardware (control and display latency of tens of milliseconds, OS pointer acceleration,
-  switch-to-switch spring variation, OS double-click and auto-repeat settings). They are not
-  calibrated to a particular robot or computer.
+- **Hidden dynamics are modelled, not measured.**
+  - Most ranges are anchored to published measurements or platform defaults (see "Where the
+    ranges come from" in the hard-tier section): robot and display latency, arm repeatability,
+    key-switch specifications, OS auto-repeat and double-click settings.
+  - The magnitudes of arm sag, pointer acceleration and mouse rotation are assumptions.
+  - None of the ranges is calibrated to a particular robot or computer.
 - **The `state` track hands over the next sub-goal.** It measures control, not planning or
   perception. The `vision` track has no learned result yet and is the open challenge.
 - **Vision baseline: pipeline in place, results pending.**
@@ -760,13 +778,28 @@ README).
 
 ## References
 
+- R. Agarwal, M. Schwarzer, P. S. Castro, A. Courville, M. G. Bellemare. Deep Reinforcement
+  Learning at the Edge of the Statistical Precipice. NeurIPS 2021.
+- G. Casiez, N. Roussel. No More Bricolage! Methods and Tools to Characterize, Replicate and
+  Compare Pointing Transfer Functions. UIST 2011.
+- G. Casiez, T. Pietrzak, D. Marchal, S. Poulmane, M. Falce, N. Roussel. Characterizing Latency
+  in Touch and Button-Equipped Interactive Systems. UIST 2017.
 - P. de Haan, D. Jayaraman, S. Levine. Causal Confusion in Imitation Learning. NeurIPS 2019.
 - M. Laskey, J. Lee, R. Fox, A. Dragan, K. Goldberg. DART: Noise Injection for Robust
   Imitation Learning. CoRL 2017.
+- I. S. MacKenzie, C. Ware. Lag as a Determinant of Human Performance in Interactive Systems.
+  CHI 1993.
+- A. R. Mahmood, D. Korenkevych, B. J. Komer, J. Bergstra. Setting up a Reinforcement Learning
+  Task with a Real-World Robot. IROS 2018 (arXiv:1803.07067).
+- A. Schmid, R. Wimmer. Yet Another Latency Measuring Device. EHPHCI workshop, CHI 2021.
 - S. Ross, G. Gordon, D. Bagnell. A Reduction of Imitation Learning and Structured Prediction
   to No-Regret Online Learning. AISTATS 2011.
 - C. Wen, J. Lin, T. Darrell, D. Jayaraman, Y. Gao. Fighting Copycat Agents in Behavioral
   Cloning from Observation Histories. NeurIPS 2020.
+- Manufacturer documentation: Cherry MX2A Red and MX RGB Black datasheets and the MX Green
+  product page (cherry.de); Franka Emika Panda and Universal Robots UR5e datasheets; Microsoft
+  Win32 `SetDoubleClickTime` and `SystemParametersInfo` (`SPI_GETKEYBOARDDELAY`); GTK
+  `gtk-double-click-time`.
 
 ## Citation and licence
 

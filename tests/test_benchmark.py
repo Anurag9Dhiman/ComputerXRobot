@@ -109,11 +109,12 @@ def test_report_tables_render():
     results = []
     for agent, rate in (("oracle", True), ("random", False)):
         for split in TEST_SPLITS:
-            records = [_record(t, rate) for t in TASK_ORDER for _ in range(3)]
+            records = [{**_record(t, rate), "episode_id": f"{split}/{t}/{i:03d}"} for t in TASK_ORDER for i in range(3)]
             results.append({"agent_name": agent, "privileged": agent == "oracle", "track": "state", "split": split,
-                            "summary": summarize(records)})
+                            "summary": summarize(records), "episodes": records})
     md = report(results, "splits", fmt="md")
-    assert "oracle (privileged)" in md and "| random | state | 0.0 ± 0.0" in md
+    assert "oracle (privileged)" in md and "| random | state | 0.0 [0.0, 0.0]" in md
+    assert "| random | state | 0.0 ± 0.0" in report(results, "splits", interval="std")
     assert "hard" not in report(results, "hard").split("\n")[2]  # no hard results: header only
     assert r"\begin{tabular}" in report(results, "tasks", "test", fmt="latex")
     for table in ("levels", "errors"):

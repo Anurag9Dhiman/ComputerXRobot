@@ -246,20 +246,25 @@ wrapper (`environment/gym_env.py`) exposes the same action normalized to [−1, 
    split, fixed seeds. Do not cherry-pick tasks or episodes.
 3. **Report the track.** Results are only comparable within a track. Agents that read
    simulator state outside their track are marked privileged.
-4. **Learned agents: at least 3 training seeds,** reported as mean ± std of the Bench Score
-   over seeds. A single run is reported with its bootstrap 95% CI.
+4. **Learned agents: at least 5 training seeds.** Report the mean Bench Score over seeds with
+   its 95% interval from a bootstrap over seeds and episodes (`benchmark/stats.py`; the
+   default of `python -m benchmark report`). A single run is reported with its bootstrap 95%
+   CI over episodes.
 5. **Report per-task and per-level success** and the error metrics alongside the score
    (`python -m benchmark report --table tasks|levels|errors`).
 
-All agents see identical episodes, so paired per-episode tests (e.g. McNemar) can compare two
-agents on the same split.
+All agents see identical episodes, so two agents can be compared with paired tests on the
+same split: `python -m benchmark report ... --table compare` gives the probability of
+improvement and the score difference, each with a paired-bootstrap 95% interval.
 
 ## Metrics
 
 | Metric | Definition |
 |---|---|
 | **Bench Score** | success rate per task, averaged over the 9 tasks (each task weighs the same) |
-| 95% CI | stratified bootstrap: episodes resampled within each task, 2,000 resamples |
+| 95% CI | percentile bootstrap, 2,000 resamples. Episodes are resampled within each task (stratified), and with several runs the seeds are resampled too; all seeds share one episode draw, since they play the same episodes (`benchmark/stats.py`) |
+| IQM | interquartile mean of the per-(seed, task) success rates: the mean of the middle 50% (Agarwal et al., 2021). Robust to one collapsed seed or a task every agent solves |
+| P(X > Y) | probability of improvement: for a random task, the chance that a random seed of X beats a random seed of Y (ties count half), averaged over tasks |
 | Per-level success | mean success of the tasks of each level (L1–L4) |
 | Time to success | simulated seconds, successful episodes only |
 | Wrong keys | key presses that were not the character the task needed at that moment |

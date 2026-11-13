@@ -7,17 +7,21 @@ set -e
 PY=${PY:-python}
 W=${WORKERS:-8}
 SEEDS=${SEEDS:-0 1 2 3 4}
+GRU_EPOCHS=${GRU_EPOCHS:-60}
 
 # 1. Oracle demonstrations under hidden dynamics (100 per task, perturbed).
 [ -f data/hard_train.npz ] || \
   $PY -m benchmark collect --split hard_train --per-task 100 --seed 1 --out data/hard_train.npz
 
-# 2. Behaviour cloning without and with a 4-step history of observations and actions.
+# 2. Behaviour cloning without and with a 4-step history of observations and actions, and with
+#    a GRU over the whole episode (learning/recurrent.py).
 for s in $SEEDS; do
   [ -f checkpoints/hard_bc_s$s.pt ] || \
     $PY main.py train --data data/hard_train.npz --epochs 80 --seed $s --out checkpoints/hard_bc_s$s.pt
   [ -f checkpoints/hard_bch_s$s.pt ] || \
     $PY main.py train --data data/hard_train.npz --epochs 80 --history 4 --seed $s --out checkpoints/hard_bch_s$s.pt
+  [ -f checkpoints/hard_bcr_s$s.pt ] || \
+    $PY main.py train --recurrent --data data/hard_train.npz --epochs $GRU_EPOCHS --seed $s --out checkpoints/hard_bcr_s$s.pt
 done
 
 # 3. Evaluation on hard_val, hard_test and hard_test_ood.
@@ -30,6 +34,8 @@ for s in $SEEDS; do
     $PY -m benchmark run --agent bc:checkpoints/hard_bc_s$s.pt --name bc --tag hard_bc_s$s --all-hard --split hard_val --workers $W --out-dir results
   [ -f results/hard_bch_s${s}_hard_val.json ] || \
     $PY -m benchmark run --agent bc:checkpoints/hard_bch_s$s.pt --name bc-history --tag hard_bch_s$s --all-hard --split hard_val --workers $W --out-dir results
+  [ -f results/hard_bcr_s${s}_hard_val.json ] || \
+    $PY -m benchmark run --agent bc:checkpoints/hard_bcr_s$s.pt --name bc-gru --tag hard_bcr_s$s --all-hard --split hard_val --workers $W --out-dir results
   [ -f results/nominal_bc_s${s}_hard_test_ood.json ] || \
     $PY -m benchmark run --agent bc:checkpoints/bc_s$s.pt --name bc-nominal --tag nominal_bc_s$s --all-hard --workers $W --out-dir results
 done

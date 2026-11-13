@@ -17,7 +17,7 @@ per model.
 
 ```bash
 git clone https://github.com/Anurag9Dhiman/ComputerXRobot.git && cd ComputerXRobot
-git checkout feature/publication-baselines         # until PR #9 is merged; then main
+git checkout feature/publication-baselines         # until its PR (the one adding this file) is merged; then main
 ```
 
 Either conda:

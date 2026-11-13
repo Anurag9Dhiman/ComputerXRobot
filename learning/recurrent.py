@@ -84,7 +84,7 @@ def _pad(episodes: list[tuple[np.ndarray, np.ndarray]], idx: np.ndarray):
     return torch.from_numpy(x), torch.from_numpy(y), torch.from_numpy(mask)
 
 
-def train_recurrent_bc(demos: Demonstrations, out_path: str | Path, epochs: int = 40, batch_episodes: int = 16,
+def train_recurrent_bc(demos: Demonstrations, out_path: str | Path, epochs: int = 60, batch_episodes: int = 8,
                        lr: float = 1e-3, hidden: int = 256, seed: int = 0, device: str = "auto",
                        val_fraction: float = 0.1, loss_beta: float = 0.05, verbose: bool = True) -> dict:
     from learning.policy import pick_device

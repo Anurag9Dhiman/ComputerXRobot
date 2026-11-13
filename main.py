@@ -448,7 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--history", type=int, default=0,
                    help="condition on the last H observations and actions (hidden-dynamics inference)")
     p.add_argument("--recurrent", action="store_true",
-                   help="GRU over the whole episode (learning/recurrent.py); batches are 16 episodes")
+                   help="GRU over the whole episode (learning/recurrent.py); batches are 8 episodes")
     p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("evaluate", help="success rate, time, failed presses/clicks, collisions")

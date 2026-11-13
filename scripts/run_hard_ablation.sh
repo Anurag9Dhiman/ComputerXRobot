@@ -26,4 +26,5 @@ for s in $SEEDS; do
   ablate nominal_bc_s$s --agent bc:checkpoints/bc_s$s.pt --name bc-nominal
   ablate hard_bcd_s$s --agent bc:checkpoints/hard_bc_dagger2_s$s.pt --name bc-dagger
   ablate hard_bchd_s$s --agent bc:checkpoints/hard_bch_dagger2_s$s.pt --name bc-history-dagger
+  ablate hard_bcrd_s$s --agent bc:checkpoints/hard_bcr_dagger2_s$s.pt --name bc-gru-dagger
 done

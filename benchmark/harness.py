@@ -89,10 +89,10 @@ def _init_collector(physics: str, student: str | None, images: bool = False, vis
     if student:
         import torch
 
-        from learning.policy import BCPolicy
+        from learning.policy import load_policy
 
         torch.set_num_threads(1)
-        _COLLECT["student"] = BCPolicy(student, env.config.max_step, device="cpu")
+        _COLLECT["student"] = load_policy(student, env.config.max_step, device="cpu")
 
 
 def _collect_specs(specs: list[dict], noise: float = 0.5, seed: int = 0, images: bool = False,

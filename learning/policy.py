@@ -165,6 +165,17 @@ def train_bc(
     return history
 
 
+def load_policy(checkpoint: str | Path, max_step: float, device: str = "auto"):
+    """The policy a behaviour-cloning checkpoint holds: BCPolicy (MLP, optionally with a fixed
+    history) or RecurrentBCPolicy (GRU, learning/recurrent.py)."""
+    ckpt = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    if ckpt.get("kind") == "recurrent_bc":
+        from learning.recurrent import RecurrentBCPolicy
+
+        return RecurrentBCPolicy(checkpoint, max_step, device="cpu" if device == "auto" else device)
+    return BCPolicy(checkpoint, max_step, device)
+
+
 class BCPolicy:
     """Runs a trained BCNetwork in the environment."""
 

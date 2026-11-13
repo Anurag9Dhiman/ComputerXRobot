@@ -144,6 +144,9 @@ def collect(split: str, per_task: int, tasks=None, noise: float = 0.5, seed: int
         return Demonstrations.concatenate(pool.map(_collect_specs, [[d] for d in specs], chunksize=1))
 
 
+NOT_CODE = (":(top,exclude)results", ":(top,exclude)docs", ":(top,exclude,glob)**/*.md")
+
+
 def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(["git", *args], capture_output=True, text=True, timeout=5,
@@ -162,7 +165,8 @@ def metadata(workers: int) -> dict:
         "version": BENCHMARK_VERSION,
         "git_commit": _git("rev-parse", "HEAD") or None,
         # Uncommitted changes to tracked code mean git_commit alone does not reproduce the result.
-        "git_dirty": bool(_git("status", "--porcelain", "--untracked-files=no")),
+        # Results, figures and documentation are not code (rerunning a script rewrites results/).
+        "git_dirty": bool(_git("status", "--porcelain", "--untracked-files=no", "--", ":/", *NOT_CODE)),
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "python": sys.version.split()[0],
         "mujoco": mujoco.__version__,

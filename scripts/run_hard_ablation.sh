@@ -3,17 +3,21 @@
 # run_hard_dagger.sh: which hidden real-world effect breaks which policy?
 #   PY=python WORKERS=8 SEEDS="0 1 2 3 4" sh scripts/run_hard_ablation.sh
 # Each run replays 20 hard_test episodes per task under 13 conditions (2,340 episodes).
-# Ablations whose result file exists are skipped.
+# Ablations whose result file exists with N episodes per task are skipped.
 set -e
 PY=${PY:-python}
 W=${WORKERS:-8}
 SEEDS=${SEEDS:-0 1 2 3 4}
 N=${ABLATION_PER_TASK:-20}
 
+done_with() {  # $1 = episodes per task, $2 = ablation result file
+  [ -f "$2" ] && $PY -c "import json, sys; sys.exit(json.load(open(sys.argv[2]))['episodes_per_task'] != int(sys.argv[1]))" "$1" "$2"
+}
+
 ablate() {  # $1 = tag, then the agent arguments
   tag=$1
   shift
-  [ -f results/ablation_$tag.json ] || \
+  done_with $N results/ablation_$tag.json || \
     $PY -m benchmark ablate "$@" --tag $tag --per-task $N --workers $W --out-dir results
 }
 

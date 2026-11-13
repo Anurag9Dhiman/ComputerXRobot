@@ -12,6 +12,7 @@ for a in adaptive fixed; do
   [ -f results/${a}_val.json ] || $PY -m benchmark run --agent $a --all-test --split val --workers $W --out-dir results
   [ -f results/${a}_hard_val.json ] || \
     $PY -m benchmark run --agent $a --all-hard --split hard_val --workers $W --out-dir results
-  [ -f results/ablation_$a.json ] || \
+  [ -f results/ablation_$a.json ] && $PY -c "import json, sys; sys.exit(json.load(open(sys.argv[1]))['episodes_per_task'] != $N)" \
+    results/ablation_$a.json || \
     $PY -m benchmark ablate --agent $a --per-task $N --workers $W --out-dir results
 done

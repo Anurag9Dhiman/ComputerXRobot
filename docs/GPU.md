@@ -1,7 +1,8 @@
 # Runs on a GPU server
 
-Every state-track result (`scripts/run_cpu.sh`) runs on a laptop CPU in a few hours. The one
-remaining result that needs a GPU is the **vision-track baseline**: behaviour cloning from
+Every state-track result (`scripts/run_cpu.sh`, 5 seeds) runs on a laptop CPU, in about a
+day with the recurrent baseline and the dynamics ablation. Those results are in `results/`.
+The one remaining result that needs a GPU is the **vision-track baseline**: behaviour cloning from
 pixels (`vision-bc`, `learning/vision.py`) and its diagnostic variant with the next sub-goal
 (`vision-bc-subgoal`), three seeds each, 30 epochs over ~89k samples. On an Apple-silicon
 laptop GPU this takes ~2 h per model, ~12 h in all. On an A100 it is expected to take minutes

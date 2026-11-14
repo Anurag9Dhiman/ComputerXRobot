@@ -170,7 +170,7 @@ or identified online from the response to its own commands:
   where the cursor already is from the lagging one;
 - **observation noise:** from the keyboard's observed position, which never moves.
 
-It scores 100.0 on `hard_test` and 99.4 ± 0.8 on `hard_test_ood`. The same control law with
+It scores 100.0 on `hard_test` and 99.4 [98.3, 100.0] on `hard_test_ood`. The same control law with
 identification switched off, assuming nominal dynamics (`fixed-expert`), scores 88.3 and 1.7.
 The out-of-range split can therefore be solved from observations, and solving it requires
 inferring the dynamics.
@@ -274,7 +274,7 @@ improvement and the score difference, each with a paired-bootstrap 95% interval.
 
 ## Baselines and results
 
-Five baselines on the standard splits; the hard tier adds four learned ones
+Five baselines on the standard splits; the hard tier adds six learned ones
 ([below](#hard-tier)). The scripted oracle is reported as a privileged reference; it reads the
 simulator state directly.
 
@@ -293,71 +293,73 @@ simulator state directly.
     perturbations (Laskey et al., 2017) of the executed motion, 30% strength during key
     presses and mouse drags.
   * Model: 3×256 MLP, smooth-L1 loss (β = 0.05), AdamW (lr 10⁻³, cosine), batch 512, 80 epochs.
-  * Seeds: 3, reported as mean ± std.
+  * Seeds: 5, reported as the mean with a 95% bootstrap interval over seeds and episodes.
 
 ![BC Bench Score per split and per level](docs/benchmark_results.png)
 
-*Left: BC's Bench Score per test split (mean of 3 seeds, error bars = std). Right: its
-success per difficulty level.*
+*Left: BC's Bench Score per test split (mean of 5 seeds; error bars: 95% bootstrap interval
+over seeds and episodes). Right: its success per difficulty level.*
 
 ### Bench Score per split
 
-Mean ± std over 3 seeds for `bc`; bootstrap 95% CI half-width for single runs.
+Mean over 5 seeds for `bc` and single runs for the others, each with its 95% bootstrap interval.
 
 | Agent | Track | test | test_layout | test_visual | test_dynamics | val |
 |---|---|---|---|---|---|---|
-| adaptive-expert | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
-| bc | state | 96.1 ± 4.0 | 63.9 ± 9.9 | 94.8 ± 5.8 | 84.8 ± 1.5 | 96.1 ± 5.1 |
-| fixed-expert | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
-| random | state | 0.0 ± 0.0 | 0.0 ± 0.0 | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
-| oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
+| adaptive-expert | state | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| bc | state | 91.9 [84.3, 98.0] | 57.1 [45.3, 69.9] | 90.9 [83.6, 97.6] | 80.6 [74.2, 86.1] | 92.2 [84.7, 98.6] |
+| fixed-expert | state | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+| random | state | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 0.6 [0.0, 1.7] | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] |
+| oracle (privileged) | state | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
+
+`bc` per seed on `test`: 98, 91, 100, 93 and 78 (IQM 100.0 [99.3, 100.0]).
 
 ### Success % per task: `test`
 
 | Agent | Track | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| bc | state | 100 | 100 | 100 | 100 | 90 | 88 | 100 | 100 | 87 | 96.1 ± 4.0 |
-| random | state | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 ± 0.0 |
-| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+| bc | state | 100 | 100 | 100 | 100 | 69 | 93 | 100 | 100 | 65 | 91.9 [84.3, 98.0] |
+| random | state | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 [0.0, 0.0] |
+| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
 
 ### Success % per task: `test_layout`
 
 | Agent | Track | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| bc | state | 100 | 63 | 65 | 95 | 20 | 55 | 67 | 77 | 33 | 63.9 ± 9.9 |
-| random | state | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 ± 0.0 |
-| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+| bc | state | 100 | 64 | 48 | 97 | 14 | 55 | 53 | 61 | 22 | 57.1 [45.3, 69.9] |
+| random | state | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 [0.0, 0.0] |
+| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
 
 ### Success % per task: `test_visual`
 
 | Agent | Track | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| bc | state | 100 | 100 | 100 | 100 | 82 | 85 | 100 | 100 | 87 | 94.8 ± 5.8 |
-| random | state | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0.6 ± 0.8 |
-| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+| bc | state | 100 | 100 | 100 | 100 | 63 | 91 | 100 | 100 | 64 | 90.9 [83.6, 97.6] |
+| random | state | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0.6 [0.0, 1.7] |
+| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
 
 ### Success % per task: `test_dynamics`
 
 | Agent | Track | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| bc | state | 100 | 72 | 85 | 97 | 85 | 75 | 100 | 100 | 50 | 84.8 ± 1.5 |
-| random | state | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 ± 0.0 |
-| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+| bc | state | 100 | 69 | 82 | 98 | 64 | 76 | 100 | 100 | 36 | 80.6 [74.2, 86.1] |
+| random | state | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 [0.0, 0.0] |
+| oracle (privileged) | state | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
 
 ### Success % per level
 
 | Split | L1 | L2 | L3 | L4 |
 |---|---|---|---|---|
-| `test` (bc) | 100 | 93 | 100 | 87 |
-| `test_layout` (bc) | 76 | 57 | 72 | 33 |
-| `test_visual` (bc) | 100 | 89 | 100 | 87 |
-| `test_dynamics` (bc) | 86 | 86 | 100 | 50 |
+| `test` (bc) | 100 | 87 | 100 | 65 |
+| `test_layout` (bc) | 71 | 55 | 57 | 22 |
+| `test_visual` (bc) | 100 | 85 | 100 | 64 |
+| `test_dynamics` (bc) | 84 | 79 | 100 | 36 |
 
 ### Errors and speed on `test`
 
 | Agent | Track | Wrong keys | Failed clicks | Collisions | Failed contacts | Time to success (s) |
 |---|---|---|---|---|---|---|
-| bc | state | 0.00 | 0.00 | 0.00 | 0.01 | 4.2 |
+| bc | state | 0.00 | 0.00 | 0.00 | 0.00 | 4.3 |
 | random | state | 2.41 | 0.04 | 17.55 | 0.99 | – |
 | oracle (privileged) | state | 0.00 | 0.00 | 0.00 | 0.10 | 4.2 |
 
@@ -384,27 +386,30 @@ Every standard split is solvable from the state track alone: both non-privileged
 identification is not needed there. BC's drops below are therefore failures of learning to
 generalise, not infeasible episodes.
 
-1. **Unseen content in familiar scenes is close to solved in the state track:** 96.1 ± 4.0.
-   Given the next sub-goal, an MLP generalises to strings and queries it never saw, and on
-   `test` it is as fast as the oracle (4.2 s mean time to success) with almost no errors.
-2. **Device layout is the hardest shift:** 63.9 ± 9.9, a 32-point drop.
-   - BC still types: `type_key` 100, `type_text` 95.
-   - It loses the mouse when the mouse is placed beyond its training range: `clear_text` 20,
-     `write_note` 33, `open_app` 63.
-3. **Device dynamics cost 11 points:** 84.8 ± 1.5. An unseen cursor gain and mouse friction
-   mainly hurt the right-click and long-horizon tasks (`write_note` 50).
-4. **Visual shift does not affect the state track** (94.8), as designed. It targets the
-   vision track.
-5. **Longer tasks degrade most under shift.** L4 drops to 33% on `test_layout` and 50% on
-   `test_dynamics`. Seed variance under shift is large (±9.9 on `test_layout`), so learned
-   agents need several seeds.
+1. **Unseen content in familiar scenes is close to solved in the state track:** 91.9 [84.3,
+   98.0], IQM 100.0. Given the next sub-goal, an MLP generalises to strings and queries it
+   never saw, and on `test` it is as fast as the oracle (4.3 s mean time to success) with no
+   errors. Four seeds score 91–100. Seed 4 (78) never learned the right-click menu:
+   `clear_text` 0, `write_note` 5.
+2. **Device layout is the hardest shift:** 57.1 [45.3, 69.9], a 35-point drop.
+   - BC still types: `type_key` 100, `type_text` 97.
+   - It loses the mouse when the mouse is placed beyond its training range: `clear_text` 14,
+     `write_note` 22, `close_window` 48.
+3. **Device dynamics cost 11 points:** 80.6 [74.2, 86.1]. An unseen cursor gain and mouse
+   friction mainly hurt the right-click and long-horizon tasks (`clear_text` 64, `write_note`
+   36).
+4. **Visual shift does not affect the state track** (90.9, against 91.9 on `test`), as
+   designed. It targets the vision track.
+5. **Longer tasks degrade most under shift.** L4 drops to 22% on `test_layout` and 36% on
+   `test_dynamics`. Seed variance under shift is large (38–78 per seed on `test_layout`), so
+   learned agents need several seeds.
 6. **The vision track is open.** No learned agent has been evaluated on it yet; it requires
    reading keys and screen and planning without sub-goals.
 
 ### Hard tier
 
-Realistic physics with hidden per-episode dynamics. All learned agents use the `bc` recipe
-above, with 3 seeds each.
+Realistic physics with hidden per-episode dynamics. The learned agents have 5 seeds each; the
+MLP agents use the `bc` recipe above.
 
 * **adaptive-expert** and **fixed-expert**: the non-privileged scripted experts
   ([above](#hard-tier-hidden-real-world-dynamics)), with and without online identification of
@@ -415,77 +420,141 @@ above, with 3 seeds each.
   so this is imitation of a *privileged* teacher.
 * **bc-history**: as `bc`, with the previous 4 feature vectors and commanded actions as extra
   inputs (366 inputs). Only a history can reveal latency, gain or rotation.
-* **bc-dagger** and **bc-history-dagger**: `bc` and `bc-history` after two DAgger iterations
-  (Ross et al., 2011).
+* **bc-gru**: recurrent behaviour cloning (`learning/recurrent.py`). A GRU carries a state
+  from the first step of the episode, so the policy can integrate evidence about the dynamics
+  over seconds rather than 4 steps.
+  * Inputs per step: the 70 features and the previously executed action.
+  * Model: 2×256 MLP encoder, GRU (256), MLP head on the encoding and the GRU state.
+  * Training: truncated backpropagation through time in 128-step segments, 8 episodes per
+    batch, 60 epochs, AdamW (lr 10⁻³, cosine), the `bc` loss. Batch size and epochs were chosen
+    by held-out loss on `hard_train` (0.017, against 0.026 for `bc-history`).
+* **bc-dagger**, **bc-history-dagger** and **bc-gru-dagger**: `bc`, `bc-history` and `bc-gru`
+  after two DAgger iterations (Ross et al., 2011).
   * In each iteration the current student plays 25 `hard_train` episodes per task.
   * The oracle labels every state the student visits, failed episodes included (51k–293k
     samples per iteration).
   * The student is retrained from scratch on all data so far.
 
-Bench Score, mean ± std over 3 seeds (single runs: bootstrap 95% CI half-width):
+Bench Score: mean over 5 seeds for the learned agents, single runs for the others, each with
+its 95% bootstrap interval over seeds and episodes.
 
 | Agent | Track | hard_test | hard_test_ood | hard_val |
 |---|---|---|---|---|
-| bc-nominal (zero-shot) | state | 86.9 ± 4.5 | 7.2 ± 0.5 | – |
-| bc | state | 62.0 ± 20.4 | 13.0 ± 1.9 | 65.6 ± 19.9 |
-| bc-history | state | 29.6 ± 4.2 | 4.3 ± 0.9 | 32.8 ± 5.9 |
-| bc-dagger | state | 69.3 ± 22.5 | 15.4 ± 0.9 | 67.8 ± 22.9 |
-| **bc-history-dagger** | state | **98.5 ± 0.9** | **19.4 ± 2.8** | **99.1 ± 0.7** |
-| random | state | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
-| fixed-expert (scripted, no identification) | state | 88.3 ± 4.4 | 1.7 ± 1.9 | 93.3 ± 3.3 |
-| **adaptive-expert** (scripted, online identification) | state | **100.0 ± 0.0** | **99.4 ± 0.8** | **100.0 ± 0.0** |
-| oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
+| bc-nominal (zero-shot) | state | 84.4 [79.3, 89.1] | 7.4 [4.3, 10.8] | – |
+| bc | state | 66.3 [50.3, 81.9] | 13.0 [9.2, 17.0] | 70.1 [54.1, 84.6] |
+| bc-history | state | 29.6 [24.8, 34.3] | 3.6 [1.4, 6.0] | 31.6 [25.7, 37.4] |
+| bc-gru | state | 29.1 [24.7, 34.7] | 4.1 [0.8, 9.7] | 27.3 [22.9, 32.6] |
+| bc-dagger | state | 80.8 [59.6, 98.7] | 15.8 [11.2, 20.4] | 80.4 [58.6, 99.4] |
+| bc-history-dagger | state | 87.8 [66.0, 99.4] | 19.3 [14.4, 24.0] | 88.0 [66.0, 99.7] |
+| **bc-gru-dagger** | state | **98.8 [96.9, 99.9]** | **20.9 [16.2, 26.2]** | **99.7 [99.0, 100.0]** |
+| random | state | 0.6 [0.0, 1.7] | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] |
+| fixed-expert (scripted, no identification) | state | 88.3 [83.9, 92.8] | 1.7 [0.0, 3.9] | 93.3 [90.0, 96.7] |
+| **adaptive-expert** (scripted, online identification) | state | **100.0 [100.0, 100.0]** | **99.4 [98.3, 100.0]** | **100.0 [100.0, 100.0]** |
+| oracle (privileged) | state | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
 
 ![Hard tier: Bench Score of every learned agent, and the dynamics ablation](docs/hard_results.png)
 
-*Left: hard-tier Bench Score of the learned agents (mean of 3 seeds, error bars = std). The
-dashed line is the privileged oracle (100.0); the non-privileged `adaptive-expert` scores at
-least 99.4 on both splits. Right: the dynamics
-ablation, mean of 3 seeds; the [table below](#dynamics-ablation) gives the values and std. Each
-agent has one colour in both panels.*
+*Left: hard-tier Bench Score of the learned agents (mean of 5 seeds; error bars: 95% bootstrap
+interval over seeds and episodes). The dashed line is the privileged oracle (100.0); the
+non-privileged `adaptive-expert` scores at least 99.4 on both splits. Right: the dynamics
+ablation, mean of 5 seeds; the [table below](#dynamics-ablation) gives the values and
+intervals. Each agent has one colour in both panels.*
+
+#### Mean, interquartile mean and seeds
+
+The interquartile mean (IQM) is the mean of the middle half of the per-(seed, task) success
+rates, so one collapsed seed moves it little.
+
+`hard_test`:
+
+| Agent | Mean [95% CI] | IQM [95% CI] | Per seed |
+|---|---|---|---|
+| bc-nominal | 84.4 [79.3, 89.1] | 94.8 [88.0, 98.9] | 89, 81, 91, 78, 83 |
+| bc | 66.3 [50.3, 81.9] | 79.1 [50.7, 91.1] | 63, 37, 87, 63, 83 |
+| bc-history | 29.6 [24.8, 34.3] | 12.8 [4.6, 21.7] | 34, 24, 31, 34, 24 |
+| bc-gru | 29.1 [24.7, 34.7] | 10.7 [2.8, 21.3] | 31, 38, 24, 23, 28 |
+| bc-dagger | 80.8 [59.6, 98.7] | 98.5 [68.7, 100.0] | 99, 64, 44, 98, 98 |
+| bc-history-dagger | 87.8 [66.0, 99.4] | 99.6 [81.3, 100.0] | 99, 97, 99, 99, 44 |
+| bc-gru-dagger | 98.8 [96.9, 99.9] | 100.0 [100.0, 100.0] | 99, 99, 100, 99, 96 |
+
+`hard_test_ood`:
+
+| Agent | Mean [95% CI] | IQM [95% CI] | Per seed |
+|---|---|---|---|
+| bc-nominal | 7.4 [4.3, 10.8] | 1.1 [0.0, 3.0] | 7, 7, 8, 9, 7 |
+| bc | 13.0 [9.2, 17.0] | 7.6 [3.0, 11.3] | 16, 11, 12, 10, 16 |
+| bc-history | 3.6 [1.4, 6.0] | 0.4 [0.0, 0.9] | 6, 3, 4, 4, 1 |
+| bc-gru | 4.1 [0.8, 9.7] | 0.9 [0.0, 2.2] | 1, 14, 2, 2, 2 |
+| bc-dagger | 15.8 [11.2, 20.4] | 11.7 [6.1, 15.9] | 14, 15, 17, 22, 11 |
+| bc-history-dagger | 19.3 [14.4, 24.0] | 11.3 [6.5, 15.9] | 17, 18, 23, 23, 16 |
+| bc-gru-dagger | 20.9 [16.2, 26.2] | 13.5 [8.5, 18.7] | 19, 20, 18, 19, 28 |
+
+Paired comparisons on `hard_test` (the same episodes for every agent): the probability that X
+beats Y on a random task and seed, and the difference in Bench Score.
+
+| X vs Y | P(X > Y) % | Δ score |
+|---|---|---|
+| bc-gru-dagger vs bc-history-dagger | 57.6 [45.6, 67.6] | 11.0 [-1.6, 32.9] |
+| bc-gru-dagger vs bc-dagger | 63.6 [50.9, 73.6] | 18.0 [0.0, 39.8] |
+| bc-gru-dagger vs bc-nominal | 70.4 [58.9, 77.1] | 14.3 [9.2, 19.4] |
+| bc-gru-dagger vs bc-gru | 86.7 [84.4, 88.9] | 69.7 [63.9, 74.4] |
+| bc-history-dagger vs bc-dagger | 54.9 [38.2, 69.6] | 7.0 [-22.0, 32.8] |
+| bc-history-dagger vs bc-history | 85.6 [69.1, 94.4] | 58.2 [34.7, 72.7] |
+| bc-nominal vs bc | 65.1 [53.3, 74.2] | 18.1 [2.7, 35.4] |
+| bc-history vs bc-gru | 48.9 [37.3, 62.7] | 0.4 [-6.8, 6.9] |
+
+`python -m benchmark report results/hard_*.json results/nominal_bc_*.json --table compare
+--split hard_test` lists every pair.
 
 #### Success % per task: `hard_test`
 
 | Agent | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
 |---|---|---|---|---|---|---|---|---|---|---|
-| bc-nominal | 100 | 98 | 78 | 100 | 83 | 57 | 100 | 85 | 80 | 86.9 ± 4.5 |
-| bc | 65 | 98 | 78 | 47 | 100 | 97 | 20 | 17 | 37 | 62.0 ± 20.4 |
-| bc-history | 100 | 43 | 5 | 95 | 0 | 12 | 7 | 3 | 2 | 29.6 ± 4.2 |
-| bc-dagger | 62 | 100 | 100 | 55 | 100 | 100 | 32 | 32 | 43 | 69.3 ± 22.5 |
-| bc-history-dagger | 100 | 100 | 100 | 100 | 100 | 98 | 95 | 95 | 98 | 98.5 ± 0.9 |
-| random | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0.6 ± 0.8 |
-| fixed-expert | 95 | 100 | 100 | 80 | 100 | 100 | 60 | 65 | 95 | 88.3 ± 4.4 |
-| adaptive-expert | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
-| oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+| bc-nominal | 100 | 97 | 72 | 100 | 70 | 62 | 100 | 90 | 69 | 84.4 [79.3, 89.1] |
+| bc | 79 | 95 | 68 | 65 | 79 | 92 | 38 | 40 | 41 | 66.3 [50.3, 81.9] |
+| bc-history | 100 | 38 | 3 | 95 | 7 | 11 | 5 | 2 | 5 | 29.6 [24.8, 34.3] |
+| bc-gru | 100 | 31 | 0 | 100 | 0 | 0 | 19 | 11 | 1 | 29.1 [24.7, 34.7] |
+| bc-dagger | 77 | 99 | 100 | 71 | 100 | 100 | 56 | 59 | 65 | 80.8 [59.6, 98.7] |
+| bc-history-dagger | 80 | 100 | 100 | 80 | 100 | 98 | 76 | 77 | 79 | 87.8 [66.0, 99.4] |
+| bc-gru-dagger | 100 | 100 | 100 | 97 | 100 | 98 | 99 | 96 | 99 | 98.8 [96.9, 99.9] |
+| random | 0 | 0 | 0 | 0 | 5 | 0 | 0 | 0 | 0 | 0.6 [0.0, 1.7] |
+| fixed-expert | 95 | 100 | 100 | 80 | 100 | 100 | 60 | 65 | 95 | 88.3 [83.9, 92.8] |
+| adaptive-expert | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
+| oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
 
 #### Success % per task: `hard_test_ood`
 
 | Agent | type_key (L1) | open_app (L1) | close_window (L1) | type_text (L2) | clear_text (L2) | open_file (L2) | search (L3) | open_result (L3) | write_note (L4) | Score |
 |---|---|---|---|---|---|---|---|---|---|---|
-| bc-nominal | 30 | 2 | 2 | 30 | 0 | 0 | 2 | 0 | 0 | 7.2 ± 0.5 |
-| bc | 7 | 38 | 22 | 0 | 27 | 23 | 0 | 0 | 0 | 13.0 ± 1.9 |
-| bc-history | 8 | 27 | 0 | 0 | 0 | 3 | 0 | 0 | 0 | 4.3 ± 0.9 |
-| bc-dagger | 12 | 42 | 27 | 0 | 37 | 20 | 2 | 0 | 0 | 15.4 ± 0.9 |
-| bc-history-dagger | 7 | 52 | 53 | 2 | 43 | 18 | 0 | 0 | 0 | 19.4 ± 2.8 |
-| random | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 ± 0.0 |
-| fixed-expert | 5 | 0 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 1.7 ± 1.9 |
-| adaptive-expert | 100 | 100 | 100 | 100 | 100 | 95 | 100 | 100 | 100 | 99.4 ± 0.8 |
-| oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 ± 0.0 |
+| bc-nominal | 32 | 3 | 3 | 28 | 0 | 0 | 1 | 0 | 0 | 7.4 [4.3, 10.8] |
+| bc | 7 | 45 | 19 | 0 | 21 | 25 | 0 | 0 | 0 | 13.0 [9.2, 17.0] |
+| bc-history | 7 | 22 | 0 | 0 | 1 | 2 | 0 | 0 | 0 | 3.6 [1.4, 6.0] |
+| bc-gru | 6 | 21 | 3 | 1 | 3 | 3 | 0 | 0 | 0 | 4.1 [0.8, 9.7] |
+| bc-dagger | 16 | 42 | 26 | 3 | 36 | 18 | 1 | 0 | 0 | 15.8 [11.2, 20.4] |
+| bc-history-dagger | 7 | 54 | 53 | 1 | 40 | 19 | 0 | 0 | 0 | 19.3 [14.4, 24.0] |
+| bc-gru-dagger | 21 | 60 | 45 | 3 | 43 | 14 | 0 | 0 | 2 | 20.9 [16.2, 26.2] |
+| random | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0.0 [0.0, 0.0] |
+| fixed-expert | 5 | 0 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 1.7 [0.0, 3.9] |
+| adaptive-expert | 100 | 100 | 100 | 100 | 100 | 95 | 100 | 100 | 100 | 99.4 [98.3, 100.0] |
+| oracle (privileged) | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100.0 [100.0, 100.0] |
 
 #### Errors per episode and mean time to success
 
 | Agent | Split | Wrong keys | Failed clicks | Collisions | Failed contacts | Time to success (s) |
 |---|---|---|---|---|---|---|
-| bc-nominal | `hard_test` | 0.01 | 7.10 | 0.22 | 5.28 | 5.2 |
-| bc-history-dagger | `hard_test` | 2.62 | 0.04 | 0.01 | 4.92 | 6.0 |
+| bc-nominal | `hard_test` | 0.01 | 9.10 | 0.13 | 5.99 | 5.3 |
+| bc-history-dagger | `hard_test` | 1.98 | 0.03 | 0.01 | 3.89 | 5.5 |
+| bc-gru-dagger | `hard_test` | 0.74 | 0.01 | 0.00 | 4.01 | 5.0 |
 | fixed-expert | `hard_test` | 11.37 | 0.07 | 0.00 | 13.35 | 7.8 |
 | adaptive-expert | `hard_test` | 0.01 | 0.00 | 0.00 | 3.18 | 4.8 |
 | oracle (privileged) | `hard_test` | 0.00 | 0.00 | 0.00 | 3.05 | 4.6 |
-| bc-nominal | `hard_test_ood` | 1.31 | 1.34 | 69.13 | 5.96 | 7.6 |
-| bc | `hard_test_ood` | 8.04 | 2.39 | 94.31 | 18.54 | 6.8 |
-| bc-dagger | `hard_test_ood` | 6.12 | 1.80 | 125.95 | 10.71 | 8.0 |
-| bc-history | `hard_test_ood` | 4.17 | 0.76 | 12.96 | 7.41 | 7.4 |
-| bc-history-dagger | `hard_test_ood` | 9.40 | 1.21 | 11.37 | 16.41 | 5.5 |
+| bc-nominal | `hard_test_ood` | 1.23 | 2.11 | 67.39 | 5.03 | 6.5 |
+| bc | `hard_test_ood` | 14.15 | 3.52 | 78.31 | 18.86 | 6.3 |
+| bc-history | `hard_test_ood` | 4.03 | 0.77 | 13.90 | 7.53 | 7.8 |
+| bc-gru | `hard_test_ood` | 13.25 | 2.18 | 17.39 | 13.94 | 6.1 |
+| bc-dagger | `hard_test_ood` | 8.96 | 2.25 | 93.58 | 14.67 | 8.0 |
+| bc-history-dagger | `hard_test_ood` | 7.41 | 1.06 | 13.56 | 13.05 | 5.9 |
+| bc-gru-dagger | `hard_test_ood` | 15.50 | 1.33 | 25.49 | 15.65 | 8.5 |
 | fixed-expert | `hard_test_ood` | 11.26 | 1.25 | 33.43 | 13.36 | 5.3 |
 | adaptive-expert | `hard_test_ood` | 0.17 | 0.61 | 0.28 | 7.84 | 7.3 |
 | oracle (privileged) | `hard_test_ood` | 0.02 | 0.24 | 0.19 | 6.82 | 6.7 |
@@ -495,114 +564,136 @@ agent has one colour in both panels.*
 #### Findings
 
 1. **The hard tier separates in-range adaptation from extrapolation.**
-   - In range, the best learned agent reaches 98.5 ± 0.9.
-   - Beyond the training range, every learned agent scores at most 19.4 ± 2.8.
+   - In range, the best learned agent (`bc-gru-dagger`) reaches 98.8 [96.9, 99.9].
+   - Beyond the training range, every learned agent scores at most 20.9 [16.2, 26.2].
    - Without privileged access, a controller that identifies the dynamics online scores 99.4
-     ± 0.8 beyond the range, at every latency (98–100% at 40, 60 and 80 ms). The same
+     [98.3, 100.0] beyond the range, at every latency (98–100% at 40, 60 and 80 ms). The same
      controller assuming nominal dynamics scores 1.7.
-   - The out-of-range gap (80 points) is therefore closable from observations, and closing it
+   - The out-of-range gap (79 points) is therefore closable from observations, and closing it
      takes inferring the dynamics in context rather than memorising their range.
 2. **Imitating a privileged teacher fails without on-policy data.**
    - The oracle acts on state the student cannot observe: commands still in flight, the true
      hand position, the mouse's rotation and gain.
-   - Plain `bc` on `hard_train` (62.0 ± 20.4) scores *below* the nominal policy applied
-     zero-shot (86.9).
+   - Plain `bc` on `hard_train` (66.3 [50.3, 81.9]) scores *below* the nominal policy applied
+     zero-shot (84.4 [79.3, 89.1]): 18.1 points [2.7, 35.4] lower.
    - It drifts into states the oracle never visits and has no label for them. For example, it
      settles 5 mm beside a key and never presses it; seed 1 types nothing at all.
-   - Its fit to the training data is the same for all three seeds. The variance comes from
-     closed-loop drift, not from fitting.
-3. **History helps only with DAgger.**
-   - Without DAgger, the 4-step history halves the score (29.6 ± 4.2). The policy copies its
-     own recent actions, the "copycat" problem (de Haan et al., 2019; Wen et al., 2020), and
-     stalls on mouse tasks (`clear_text` 0, `close_window` 5).
-   - DAgger labels exactly those states, and history then becomes decisive: 98.5 ± 0.9 with
-     history against 69.3 ± 22.5 without, and stable across seeds.
+   - Its seeds range from 37 to 87.
+3. **Memory helps only with DAgger.**
+   - Without DAgger, a 4-step history and a recurrent state both halve the score: `bc-history`
+     29.6 and `bc-gru` 29.1 (difference 0.4 [−6.8, 6.9]). Both type (`type_key` 100) and stall
+     on mouse tasks (`clear_text` 7 and 0, `close_window` 3 and 0). The policy copies its own
+     recent actions, the "copycat" problem (de Haan et al., 2019; Wen et al., 2020). A longer
+     memory does not remove it.
+   - DAgger labels exactly those states. `bc-gru-dagger` gains 69.7 points [63.9, 74.4] over
+     `bc-gru`, and `bc-history-dagger` 58.2 [34.7, 72.7] over `bc-history`.
    - Telling how much of the motion is still in flight takes the recent action history.
-4. **A policy trained in idealised physics is robust in range and brittle beyond.**
-   - `bc-nominal` keeps 86.9 in range. Most of its losses come from interaction timing and
+4. **With DAgger, the recurrent policy is the only one that is stable across seeds.**
+   - `bc-gru-dagger` scores 96–100 on every seed. `bc-history-dagger` scores 97–99 on four
+     seeds and 44 on the fifth; `bc-dagger` scores 98–99 on three seeds, 64 and 44.
+   - A run at 44.4 never presses a key: it solves every episode of the four mouse-only tasks
+     and none of the five tasks that need the keyboard (4 of 9 tasks). `bc-dagger`'s seed at
+     64 types in about a third of those episodes.
+   - The collapse is visible before testing: these runs score the same on `hard_val`, and the
+     collapsed `bc-history-dagger` run ends training at twice the held-out loss of the other
+     seeds (0.043 against 0.021–0.024). All seeds are reported here; none was retrained.
+   - The mean therefore understates the typical run and the IQM hides the collapse:
+     `bc-history-dagger` has mean 87.8 and IQM 99.6. Report both, with the per-seed scores.
+   - With 5 seeds, the in-range advantage of `bc-gru-dagger` over `bc-history-dagger` (11.0
+     points [−1.6, 32.9]) and of `bc-history-dagger` over `bc-dagger` (7.0 [−22.0, 32.8]) is
+     not established. Its advantage over `bc-nominal` is (14.3 [9.2, 19.4]).
+5. **A policy trained in idealised physics is robust in range and brittle beyond.**
+   - `bc-nominal` keeps 84.4 in range. Most of its losses come from interaction timing and
      precise clicking.
    - It never learned to double-click. It opens files only when repeated clicks happen to
-     fall within the double-click window: `open_file` 57%, with 11.8 clicks per episode
+     fall within the double-click window: `open_file` 62%, with 15.3 clicks per episode
      against the oracle's 3.7.
-   - On `close_window` it clicks 58 times per episode around the button.
-   - Beyond the range it collapses to 7.2.
-5. **Out of range, success falls off a latency cliff.** Success on `hard_test_ood`, by the
-   episode's control latency (pooled over seeds, 168–192 episodes each):
+   - On `close_window` it clicks 74 times per episode around the button.
+   - Beyond the range it collapses to 7.4.
+6. **Out of range, success falls off a latency cliff.** Success on `hard_test_ood`, by the
+   episode's control latency (pooled over 5 seeds, 280–320 episodes each):
 
    | Agent | 40 ms | 60 ms | 80 ms |
    |---|---|---|---|
-   | bc-nominal | 21.1 | 0.5 | 0.0 |
-   | bc | 32.8 | 4.2 | 1.8 |
-   | bc-dagger | 37.8 | 5.2 | 3.0 |
-   | bc-history-dagger | 40.0 | 15.6 | 1.8 |
+   | bc-nominal | 20.7 | 1.2 | 0.4 |
+   | bc | 31.3 | 5.3 | 2.1 |
+   | bc-dagger | 37.3 | 6.2 | 3.6 |
+   | bc-history-dagger | 40.3 | 13.8 | 3.2 |
+   | bc-gru-dagger | 40.0 | 15.0 | 7.1 |
 
    - Training covered at most 20 ms.
-   - The history policy degrades most gracefully, but no learned policy copes with 80 ms.
+   - The policies with memory degrade most gracefully, but no learned policy copes with 80 ms.
+     A recurrent state over the whole episode does not extrapolate further than a 4-step
+     history: 20.9 against 19.3 overall (difference 1.6 [−3.8, 7.3]).
      `adaptive-expert` succeeds in 100.0%, 98.4% and 100.0% of episodes at 40, 60 and 80 ms;
      `fixed-expert` in 5.0%, 0.0% and 0.0%.
-   - Memoryless policies also collide with the desk or keyboard 69–126 times per episode,
-     against 11–13 for the history policies.
+   - Memoryless policies also collide with the desk or keyboard 67–94 times per episode,
+     against 14–25 for the history and recurrent policies.
    - The [dynamics ablation](#dynamics-ablation) confirms that latency, not the other
      effects, causes most of the collapse.
-6. **DAgger also teaches recovery.**
-   - `bc-history-dagger` makes typos in long queries: 8–12 wrong keys per `search` or
-     `open_result` episode, against 0 for the oracle.
-   - It still succeeds in 95% of them, because it corrects each typo with backspace.
+7. **DAgger also teaches recovery.**
+   - `bc-gru-dagger` makes typos in long queries: 1.2 wrong keys per `search` episode and 3.8
+     per `open_result` episode, against 0 for the oracle. `bc-history-dagger` makes 6.5 and
+     8.8.
+   - `bc-gru-dagger` still succeeds in 99% and 96% of those episodes, because it corrects each
+     typo with backspace.
    - That recovery comes from the oracle's labels on the student's own mistakes.
 
 ### Dynamics ablation
 
-Which real-world effect breaks which policy? The ablation replays 5 `hard_test` episodes per
-task under 13 conditions:
+Which real-world effect breaks which policy? The ablation replays 20 `hard_test` episodes per
+task (all of them) under 13 conditions:
 
 - **in range:** each episode's own `real_id` dynamics;
 - **one parameter at a time:** pushed to its `real_ood` value, all others in range;
 - **all:** every parameter pushed.
 
-Learned agents: mean ± std over 3 seeds. The scripted experts are single deterministic runs
-(bootstrap 95% CI half-width). The oracle scores 100.0 under every condition.
+Learned agents: mean over 5 seeds with the 95% bootstrap interval over seeds and episodes.
+The scripted experts are single deterministic runs (interval over episodes). `adaptive-expert`
+and the oracle score 100.0 under every condition.
 
-| Condition | bc-nominal | bc-dagger | bc-history-dagger | fixed-expert | adaptive-expert |
-|---|---|---|---|---|---|
-| in range | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 | 86.7 ± 6.7 | 100.0 ± 0.0 |
-| **control latency** (40–80 ms) | **6.7 ± 1.8** | **20.7 ± 2.8** | **31.1 ± 4.8** | **17.8 ± 7.8** | 100.0 ± 0.0 |
-| display latency (60–100 ms) | 51.1 ± 4.8 | 68.1 ± 22.2 | 96.3 ± 2.1 | 53.3 ± 11.1 | 100.0 ± 0.0 |
-| actuation noise | 87.4 ± 5.2 | 68.9 ± 23.2 | 99.3 ± 1.0 | 93.3 ± 4.4 | 100.0 ± 0.0 |
-| observation noise | 86.7 ± 6.5 | 68.1 ± 23.4 | 99.3 ± 1.0 | 88.9 ± 7.8 | 100.0 ± 0.0 |
-| arm sag | 90.4 ± 1.0 | 65.9 ± 19.2 | 98.5 ± 1.0 | 82.2 ± 8.9 | 100.0 ± 0.0 |
-| pointer acceleration | 73.3 ± 1.8 | 67.4 ± 21.2 | 97.8 ± 3.1 | 84.4 ± 7.8 | 100.0 ± 0.0 |
-| mouse rotation | 68.9 ± 12.7 | 64.4 ± 22.0 | 96.3 ± 2.8 | 86.7 ± 8.9 | 100.0 ± 0.0 |
-| key spring force | 88.9 ± 0.0 | 68.1 ± 22.2 | 97.8 ± 1.8 | 86.7 ± 6.7 | 100.0 ± 0.0 |
-| key actuation depth | 88.1 ± 1.0 | 68.9 ± 22.0 | 96.3 ± 1.0 | 88.9 ± 6.7 | 100.0 ± 0.0 |
-| auto-repeat | 86.7 ± 3.1 | 68.1 ± 22.2 | 99.3 ± 1.0 | 86.7 ± 6.7 | 100.0 ± 0.0 |
-| double-click time | 86.7 ± 3.1 | 68.1 ± 22.2 | 100.0 ± 0.0 | 86.7 ± 6.7 | 100.0 ± 0.0 |
-| all | 3.0 ± 1.0 | 9.6 ± 2.8 | 20.0 ± 3.1 | 0.0 ± 0.0 | 100.0 ± 0.0 |
+| Condition | bc-nominal | bc-dagger | bc-history-dagger | bc-gru-dagger | fixed-expert | adaptive-expert |
+|---|---|---|---|---|---|---|
+| in range | 84.4 [79.3, 89.1] | 80.8 [59.6, 98.7] | 87.8 [66.0, 99.4] | 98.8 [96.9, 99.9] | 88.3 [83.9, 92.8] | 100.0 |
+| **control latency** (40–80 ms) | **8.4 [5.1, 11.8]** | **20.2 [15.3, 25.6]** | **30.3 [25.6, 34.7]** | **32.7 [26.4, 39.2]** | **11.7 [7.8, 15.6]** | 100.0 |
+| display latency (60–100 ms) | 50.8 [44.8, 56.2] | 80.4 [59.2, 98.6] | 86.8 [65.3, 98.7] | 96.4 [92.6, 99.2] | 57.2 [51.1, 63.3] | 100.0 |
+| actuation noise | 87.2 [82.0, 92.0] | 81.4 [59.8, 99.6] | 88.7 [66.4, 100.0] | 99.0 [97.6, 100.0] | 91.1 [87.2, 94.4] | 100.0 |
+| observation noise | 86.4 [81.7, 90.8] | 81.7 [59.6, 100.0] | 88.7 [66.4, 100.0] | 99.2 [97.7, 100.0] | 93.3 [90.0, 96.7] | 100.0 |
+| arm sag | 86.4 [81.8, 91.1] | 80.3 [59.4, 97.9] | 87.0 [65.4, 98.8] | 98.7 [96.7, 100.0] | 86.7 [82.2, 90.6] | 100.0 |
+| pointer acceleration | 73.1 [66.4, 79.3] | 79.8 [58.6, 98.2] | 87.0 [65.4, 98.9] | 97.8 [95.8, 99.3] | 82.8 [77.8, 87.2] | 100.0 |
+| mouse rotation | 71.6 [61.8, 80.1] | 78.8 [56.6, 97.6] | 86.1 [63.6, 98.6] | 98.2 [95.7, 99.9] | 86.1 [81.7, 90.6] | 100.0 |
+| key spring force | 84.7 [79.4, 89.2] | 81.0 [59.7, 98.9] | 87.2 [65.7, 98.9] | 98.8 [97.1, 99.9] | 90.0 [86.1, 93.9] | 100.0 |
+| key actuation depth | 84.8 [79.7, 89.2] | 80.7 [59.7, 98.3] | 86.4 [65.2, 98.1] | 99.1 [97.8, 100.0] | 87.2 [83.3, 91.1] | 100.0 |
+| auto-repeat | 84.4 [79.3, 89.1] | 80.8 [59.6, 98.7] | 87.4 [65.8, 99.2] | 98.1 [95.8, 99.7] | 88.3 [83.9, 92.8] | 100.0 |
+| double-click time | 84.4 [79.3, 89.1] | 80.8 [59.6, 98.7] | 87.8 [66.0, 99.4] | 98.8 [96.9, 99.9] | 88.3 [83.9, 92.8] | 100.0 |
+| all | 7.2 [4.3, 10.3] | 12.0 [7.0, 18.1] | 17.1 [13.1, 21.4] | 14.7 [10.7, 19.4] | 1.1 [0.0, 2.8] | 100.0 |
 
 1. **Control latency alone causes most of the collapse.**
-   - Pushing only the latency out of range takes the best policy from 100.0 to 31.1. Pushing
-     every parameter takes it to 20.0.
+   - Pushing only the latency out of range takes the best policy from 98.8 to 32.7. Pushing
+     every parameter takes it to 14.7.
    - Every policy here reacts to the state it sees. Under 40–80 ms of latency, it must instead
      act on the state its commands in flight will produce, and none learned to do so beyond
      20 ms.
-   - The history policy keeps the most (31.1), consistent with history carrying the commands
-     in flight.
+   - The policies with memory keep the most (32.7 and 30.3, against 20.2 without memory; the
+     4-step history gains 10.1 points [4.6, 15.6] over `bc-dagger`), consistent with memory
+     carrying the commands in flight.
 2. **Visual and mouse dynamics break the policy that never saw them.**
-   - `bc-nominal` loses 36 points to display latency, 18 to mouse rotation and 13 to pointer
+   - `bc-nominal` loses 34 points to display latency, 13 to mouse rotation and 11 to pointer
      acceleration.
-   - The policies trained under hidden dynamics lose at most 4 points to any of these.
+   - The policies trained under hidden dynamics lose at most 3 points to any of these.
    - Training under the in-range dynamics transfers to stronger versions of these effects, but
      not to stronger latency.
 3. **Noise, sag, key forces and OS timing are absorbed.**
    - Out of range, actuation and observation noise, arm sag, key spring force and actuation
-     depth, auto-repeat and double-click time each cost at most 4 points.
+     depth, auto-repeat and double-click time each cost at most 2 points.
    - Some of these effects already cost the zero-shot policy in range (double-click,
-     [finding 4](#findings-1)). The extra strength beyond the training range adds little.
-4. **Effects compound.** "all" is below the worst single effect for every policy: 20.0
-   against 31.1 for `bc-history-dagger`.
+     [finding 5](#findings-1)). The extra strength beyond the training range adds little.
+4. **Effects compound.** "all" is below the worst single effect for every policy: 14.7
+   against 32.7 for `bc-gru-dagger`, 17.1 against 30.3 for `bc-history-dagger`.
 5. **Identification removes every failure.** With online identification the scripted expert
    scores 100.0 under every condition, "all" included. Without it, the same law fails on
-   exactly the two effects that break the learned policies: control latency (17.8) and display
-   latency (53.3). The ablation's failures are therefore failures to infer the dynamics, not
+   exactly the two effects that break the learned policies: control latency (11.7) and display
+   latency (57.2). The ablation's failures are therefore failures to infer the dynamics, not
    effects that make the episodes infeasible.
 
 ### Dynamics-prediction results
@@ -635,19 +726,28 @@ trained on `hard_train` trajectories (360 episodes) and reported as mean ± std 
 ## Reproducing the results
 
 ```bash
-pip install -r requirements.txt
-sh scripts/run_baselines.sh          # PY=python WORKERS=8; ~15 min on a 10-core laptop
+pip install -e .                     # or: pip install -r requirements.txt
+PY=python WORKERS=8 sh scripts/run_cpu.sh   # every state-track result, 5 seeds (CPU)
+sh scripts/run_gpu.sh                # the vision-track baseline (CUDA GPU; docs/GPU.md)
 python -m benchmark report results/*.json --table splits            # Markdown tables
 python -m benchmark report results/*.json --table tasks --split test --format latex
 python -m benchmark.plot results/*.json --agent bc --out docs/benchmark_results.png
+python -m benchmark.plot results/*.json --hard --out docs/hard_results.png
 ```
 
-`scripts/run_baselines.sh` does the following:
+`scripts/run_cpu.sh` runs the five scripts below in order. Each skips every step whose output
+exists, so an interrupted run resumes where it stopped; `SEEDS="0 1 2"` limits the seeds. The
+standard and hard-tier baselines take about 3 hours on a 10-core laptop with 8 workers, the
+dynamics ablation about 5 hours (~15 min per agent and seed), and the recurrent baseline most
+of the rest: one `bc-gru` training run takes 0.5–1.5 h on the laptop CPU, three per seed with
+DAgger.
+
+`scripts/run_baselines.sh` (~25 min) does the following:
 
 1. Collects oracle demonstrations on `train`: 100 per task, `id` scenes, DART-style
    perturbations (~3 min).
-2. Trains three behaviour-cloning seeds (~30 s each on CPU).
-3. Evaluates the oracle, random and the three seeds on `val` and every test split (~9 min).
+2. Trains five behaviour-cloning seeds (~30 s each on CPU).
+3. Evaluates the oracle, random and the five seeds on `val` and every test split.
 
 Each result file (`results/<agent>_<split>.json`) contains:
 
@@ -661,26 +761,32 @@ Results do not depend on the number of workers (`tests/test_benchmark.py`).
 The hard tier, the dynamics ablation and the dynamics-prediction track:
 
 ```bash
-sh scripts/run_hard_baselines.sh     # oracle, random, bc, bc-history, bc-nominal; ~55 min
-sh scripts/run_hard_dagger.sh        # bc-dagger, bc-history-dagger; ~70 min
-sh scripts/run_hard_ablation.sh      # dynamics ablation, 10 runs
-sh scripts/run_adaptive.sh           # adaptive-expert and fixed-expert: every split + ablation; ~10 min
+sh scripts/run_hard_baselines.sh     # oracle, random, bc, bc-history, bc-gru, bc-nominal
+sh scripts/run_hard_dagger.sh        # bc-dagger, bc-history-dagger, bc-gru-dagger
+sh scripts/run_adaptive.sh           # adaptive-expert and fixed-expert: every split + ablation; ~25 min
+sh scripts/run_hard_ablation.sh      # dynamics ablation: oracle + 4 learned agents x 5 seeds
 python -m benchmark report results/*.json --table hard
+python -m benchmark report results/*.json --table aggregate --split hard_test
+python -m benchmark report results/hard_*_hard_test.json --table compare --split hard_test
 python -m benchmark report results/*.json --table ablation
 python -m benchmark.world_model collect && python -m benchmark.world_model train \
   && python -m benchmark.world_model evaluate --out results/world_model.json
 ```
 
 1. `run_hard_baselines.sh` collects 100 perturbed oracle demonstrations per task on
-   `hard_train` (~4 min). It then trains three seeds each of `bc` and `bc-history` (~40 s each)
-   and evaluates them, the oracle, random and the v1.0 checkpoints on the hard splits (~47 min).
-2. `run_hard_dagger.sh` runs two DAgger iterations from every `bc` and `bc-history`
-   checkpoint, then evaluates the results. In each iteration the student plays 25 `hard_train`
-   episodes per task, the oracle labels every visited state, and the student is retrained on
-   all data so far.
-3. `run_hard_ablation.sh` runs the dynamics ablation for the oracle, `bc-nominal`, `bc-dagger` and `bc-history-dagger`, with 5 `hard_test` episodes per task and condition.
-4. `run_adaptive.sh` evaluates `adaptive-expert` and `fixed-expert` on every split and runs
+   `hard_train` (~4 min). It then trains five seeds each of `bc` and `bc-history` (~40 s each)
+   and of `bc-gru`, and evaluates them, the oracle, random and the standard-split `bc`
+   checkpoints (`bc-nominal`) on the hard splits (~15 min per seed and agent).
+2. `run_hard_dagger.sh` runs two DAgger iterations from every `bc`, `bc-history` and `bc-gru`
+   checkpoint (`VARIANTS` selects them), then evaluates the results. In each iteration the
+   student plays 25 `hard_train` episodes per task, the oracle labels every visited state, and
+   the student is retrained on all data so far.
+3. `run_adaptive.sh` evaluates `adaptive-expert` and `fixed-expert` on every split and runs
    their dynamics ablation. They are deterministic and not trained.
+4. `run_hard_ablation.sh` runs the dynamics ablation for the oracle and every seed of
+   `bc-nominal`, `bc-dagger`, `bc-history-dagger` and `bc-gru-dagger`, with 20 `hard_test`
+   episodes per task and condition (`ABLATION_PER_TASK` changes it; a result file with another
+   count is rerun).
 
 ## Evaluating your own agent
 

@@ -5,6 +5,7 @@
     python -m benchmark run --agent bc:checkpoints/bc_s0.pt --tag bc_s0 --all-test --workers 8
     python -m benchmark collect --per-task 40 --out data/train.npz
     python -m benchmark report results/*.json --table splits --format latex
+    python -m benchmark report results/hard_*_hard_test_ood.json --table compare --split hard_test_ood
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import environment  # noqa: F401  (MUJOCO_GL / pygame env vars)
 from benchmark import BENCHMARK_NAME, BENCHMARK_VERSION
-from benchmark.report import TABLES
+from benchmark.report import INTERVALS, TABLES
 from benchmark.suite import EPISODES_PER_TASK, HARD_TEST_SPLITS, SPLITS, TASK_ORDER, TEST_SPLITS
 from benchmark.tracks import TRACKS
 from environment.task_manager import SPLITS as CONTENT_SPLITS
@@ -96,7 +97,7 @@ def cmd_ablate(args) -> int:
 def cmd_report(args) -> int:
     from benchmark.report import load, report
 
-    text = report(load(args.results), args.table, args.split, args.format)
+    text = report(load(args.results), args.table, args.split, args.format, args.interval)
     print(text)
     if args.out:
         Path(args.out).write_text(text + "\n")
@@ -154,6 +155,8 @@ def main(argv=None) -> int:
     p.add_argument("--table", choices=TABLES, default="splits")
     p.add_argument("--split", default="test", help="split for the tasks / levels / errors tables")
     p.add_argument("--format", choices=("md", "latex"), default="md")
+    p.add_argument("--interval", choices=INTERVALS, default="ci",
+                   help="ci: mean [95%% bootstrap CI over seeds and episodes]; std: mean ± std over runs")
     p.add_argument("--out")
     p.set_defaults(func=cmd_report)
 

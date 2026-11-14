@@ -57,9 +57,9 @@ def make_policy(args, env: ComputerUseEnv):
         return ScriptedPolicy(env)
     if not args.checkpoint:
         sys.exit("--policy bc needs --checkpoint")
-    from learning.policy import BCPolicy
+    from learning.policy import load_policy
 
-    return BCPolicy(args.checkpoint, env.config.max_step, device=getattr(args, "device", "auto"))
+    return load_policy(args.checkpoint, env.config.max_step, device=getattr(args, "device", "auto"))
 
 
 def add_policy_args(p: argparse.ArgumentParser) -> None:
@@ -343,6 +343,13 @@ def cmd_train(args) -> int:
     from learning.policy import train_bc
 
     demos = Demonstrations.concatenate([Demonstrations.load(p) for p in args.data])
+    if args.recurrent:
+        from learning.recurrent import train_recurrent_bc
+
+        print(f"Training recurrent BC on {len(demos)} samples from {len(demos.task_specs)} episodes")
+        train_recurrent_bc(demos, args.out, epochs=args.epochs, lr=args.lr, hidden=args.hidden, seed=args.seed,
+                           device=args.device, loss_beta=args.loss_beta)
+        return 0
     print(f"Training BC on {len(demos)} samples from {len(demos.task_specs)} episodes")
     train_bc(demos, args.out, epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
              use_images=args.images, device=args.device, seed=args.seed, hidden=args.hidden,
@@ -440,6 +447,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--loss-beta", type=float, default=0.05, help="smooth-L1 beta (smaller = closer to L1)")
     p.add_argument("--history", type=int, default=0,
                    help="condition on the last H observations and actions (hidden-dynamics inference)")
+    p.add_argument("--recurrent", action="store_true",
+                   help="GRU over the whole episode (learning/recurrent.py); batches are 8 episodes")
     p.set_defaults(func=cmd_train)
 
     p = sub.add_parser("evaluate", help="success rate, time, failed presses/clicks, collisions")

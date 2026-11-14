@@ -19,7 +19,9 @@ Agents are named by a spec string:
                             commands (learning/adaptive.py)
     fixed                   the same, assuming nominal dynamics instead of identifying them
                             (control for what identification contributes)
-    bc:<checkpoint.pt>      behaviour cloning policy (learning/policy.py), state track
+    bc:<checkpoint.pt>      behaviour cloning policy, state track: an MLP (learning/policy.py),
+                            optionally on a fixed history (bc-history), or a GRU over the
+                            episode (bc-gru, learning/recurrent.py)
     vbc:<checkpoint.pt>     behaviour cloning from pixels (learning/vision.py), vision track;
                             checkpoints trained with --subgoal need --track vision_subgoal
     <module>:<Class>        your own agent class; constructed as Class(env) and must define
@@ -113,9 +115,9 @@ class BCAgent(Agent):
 
     def __init__(self, env, checkpoint: str):
         super().__init__(env)
-        from learning.policy import BCPolicy
+        from learning.policy import load_policy
 
-        self.policy = BCPolicy(checkpoint, env.config.max_step, device="cpu")
+        self.policy = load_policy(checkpoint, env.config.max_step, device="cpu")
         self.checkpoint = checkpoint
 
     def reset(self, instruction, seed):
@@ -172,8 +174,8 @@ def agent_class(spec: str):
 
 
 def default_name(spec: str) -> str:
-    """Name under which results are grouped: the class name, or "bc-history" for a
-    history-conditioned behaviour-cloning checkpoint."""
+    """Name under which results are grouped: the class name, or for behaviour-cloning
+    checkpoints "bc-history" (fixed history) and "bc-gru" (recurrent)."""
     cls, kwargs = agent_class(spec)
     if cls is VisionBCAgent:
         import torch
@@ -184,6 +186,8 @@ def default_name(spec: str) -> str:
         import torch
 
         ckpt = torch.load(kwargs["checkpoint"], map_location="cpu", weights_only=False)
+        if ckpt.get("kind") == "recurrent_bc":
+            return "bc-gru"
         if ckpt.get("history_steps", 0):
             return "bc-history"
     return cls.name

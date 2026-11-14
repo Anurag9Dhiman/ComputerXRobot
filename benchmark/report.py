@@ -1,8 +1,12 @@
 """Tables from result files (Markdown or LaTeX).
 
-Results of the same agent and track (e.g. several training seeds of `bc`) are grouped: a
-single run shows score with its bootstrap 95% CI half-width, several runs show mean +- std
-over runs. Scores are percentages.
+Results of the same agent and track (e.g. several training seeds of `bc`) are grouped. A cell
+shows the mean score over the runs with its 95% interval from a bootstrap over seeds and test
+episodes (benchmark/stats.py); `interval="std"` shows mean ± std over runs instead (± the CI
+half-width for a single run). Scores are percentages.
+
+    aggregate   mean and interquartile mean (IQM) over seeds and tasks, with 95% intervals
+    compare     every pair of agents: probability of improvement P(X > Y) and score difference
 """
 
 from __future__ import annotations
@@ -13,10 +17,12 @@ from pathlib import Path
 
 import numpy as np
 
+from benchmark.stats import aggregate, compare
 from benchmark.suite import HARD_TEST_SPLITS, SPLITS, TASK_ORDER, TEST_SPLITS
 from environment.task_manager import TASKS
 
-TABLES = ("splits", "hard", "tasks", "levels", "errors", "ablation")
+TABLES = ("splits", "hard", "tasks", "levels", "errors", "ablation", "aggregate", "compare")
+INTERVALS = ("ci", "std")
 
 
 def load(paths) -> list[dict]:
@@ -27,7 +33,7 @@ def load(paths) -> list[dict]:
     return [r for r in results if "per_task" in r or r.get("analysis") == "dynamics_ablation"]
 
 
-def ablation_table(results: list[dict], fmt: str = "md") -> str:
+def ablation_table(results: list[dict], fmt: str = "md", interval: str = "ci") -> str:
     """Single-factor dynamics ablation (benchmark/ablation.py): one row per condition, one
     column per agent (mean ± std over runs with the same name)."""
     from benchmark.ablation import CONDITIONS
@@ -41,8 +47,7 @@ def ablation_table(results: list[dict], fmt: str = "md") -> str:
         row = [c]
         for a in agents:
             rs = [r for r in by_agent[a] if c in r["conditions"]]
-            row.append(_cell([r["conditions"][c]["score"] for r in rs],
-                             [tuple(r["conditions"][c]["score_ci"]) for r in rs], fmt))
+            row.append(_cell(rs, fmt, interval, condition=c))
         rows.append(row)
     n = {r["episodes_per_task"] for r in results}
     return _render(["Condition", *agents], rows, fmt,
@@ -62,12 +67,18 @@ def _group(results: list[dict]) -> dict[tuple[str, str], dict[str, list[dict]]]:
     return dict(sorted(groups.items(), key=lambda kv: ("privileged" in kv[0][0], kv[0])))
 
 
-def _cell(values: list[float], cis: list[tuple[float, float]], fmt: str) -> str:
-    pm = r"$\pm$" if fmt == "latex" else "±"
-    if not values:
+def _cell(runs: list[dict], fmt: str, interval: str = "ci", condition: str | None = None) -> str:
+    """Mean score of `runs` (one agent, one split or ablation condition) with its interval."""
+    if not runs:
         return "–"
+    if interval == "ci":
+        a = aggregate(runs, condition)
+        return f"{100 * a['mean']:.1f} [{100 * a['mean_ci'][0]:.1f}, {100 * a['mean_ci'][1]:.1f}]"
+    summaries = [r["conditions"][condition] if condition else r["summary"] for r in runs]
+    values = [s["score"] for s in summaries]
+    pm = r"$\pm$" if fmt == "latex" else "±"
     if len(values) == 1:
-        lo, hi = cis[0]
+        lo, hi = summaries[0]["score_ci"]
         return f"{100 * values[0]:.1f} {pm} {100 * (hi - lo) / 2:.1f}"
     return f"{100 * np.mean(values):.1f} {pm} {100 * np.std(values):.1f}"
 
@@ -86,7 +97,7 @@ def _render(header: list[str], rows: list[list[str]], fmt: str, caption: str) ->
     return "\n".join(lines)
 
 
-def splits_table(results: list[dict], fmt: str = "md", hard: bool = False) -> str:
+def splits_table(results: list[dict], fmt: str = "md", hard: bool = False, interval: str = "ci") -> str:
     candidates = (*HARD_TEST_SPLITS, "hard_val") if hard else (*TEST_SPLITS, "val", "train")
     splits = [s for s in candidates if any(r["split"] == s for r in results)]
     rows = []
@@ -95,14 +106,13 @@ def splits_table(results: list[dict], fmt: str = "md", hard: bool = False) -> st
             continue
         row = [label, track]
         for s in splits:
-            rs = by_split.get(s, [])
-            row.append(_cell([r["summary"]["score"] for r in rs], [tuple(r["summary"]["score_ci"]) for r in rs], fmt))
+            row.append(_cell(by_split.get(s, []), fmt, interval))
         rows.append(row)
     title = "Hard tier (realistic physics, hidden dynamics)" if hard else "Bench Score"
     return _render(["Agent", "Track", *splits], rows, fmt, f"{title}: success % averaged over tasks, per split")
 
 
-def tasks_table(results: list[dict], split: str = "test", fmt: str = "md") -> str:
+def tasks_table(results: list[dict], split: str = "test", fmt: str = "md", interval: str = "ci") -> str:
     rows = []
     for (label, track), by_split in _group(results).items():
         rs = by_split.get(split, [])
@@ -112,13 +122,13 @@ def tasks_table(results: list[dict], split: str = "test", fmt: str = "md") -> st
         for task in TASK_ORDER:
             vals = [r["summary"]["by_task"][task]["success"] for r in rs if task in r["summary"]["by_task"]]
             row.append(f"{100 * np.mean(vals):.0f}" if vals else "–")
-        row.append(_cell([r["summary"]["score"] for r in rs], [tuple(r["summary"]["score_ci"]) for r in rs], fmt))
+        row.append(_cell(rs, fmt, interval))
         rows.append(row)
     header = ["Agent", "Track", *[f"{t} (L{TASKS[t].level})" for t in TASK_ORDER], "Score"]
     return _render(header, rows, fmt, f"Success % per task on `{split}`")
 
 
-def levels_table(results: list[dict], split: str = "test", fmt: str = "md") -> str:
+def levels_table(results: list[dict], split: str = "test", fmt: str = "md", interval: str = "ci") -> str:
     levels = sorted({t.level for t in TASKS.values()})
     rows = []
     for (label, track), by_split in _group(results).items():
@@ -135,7 +145,7 @@ def levels_table(results: list[dict], split: str = "test", fmt: str = "md") -> s
                    f"Success % per difficulty level on `{split}`")
 
 
-def errors_table(results: list[dict], split: str = "test", fmt: str = "md") -> str:
+def errors_table(results: list[dict], split: str = "test", fmt: str = "md", interval: str = "ci") -> str:
     rows = []
     for (label, track), by_split in _group(results).items():
         rs = by_split.get(split, [])
@@ -150,13 +160,52 @@ def errors_table(results: list[dict], split: str = "test", fmt: str = "md") -> s
                     "Time to success (s)"], rows, fmt, f"Errors per episode and mean time to success on `{split}`")
 
 
-def report(results: list[dict], table: str = "splits", split: str = "test", fmt: str = "md") -> str:
+def _pct(x: float, ci: tuple[float, float]) -> str:
+    return f"{100 * x:.1f} [{100 * ci[0]:.1f}, {100 * ci[1]:.1f}]"
+
+
+def aggregate_table(results: list[dict], split: str = "test", fmt: str = "md", interval: str = "ci") -> str:
+    """Mean and IQM over seeds and tasks with 95% bootstrap intervals, and the per-seed scores."""
+    rows = []
+    for (label, track), by_split in _group(results).items():
+        rs = by_split.get(split, [])
+        if not rs:
+            continue
+        a = aggregate(rs)
+        seeds = ", ".join(f"{100 * x:.0f}" for x in a["seed_scores"])
+        rows.append([label, track, str(a["runs"]), _pct(a["mean"], a["mean_ci"]), _pct(a["iqm"], a["iqm_ci"]), seeds])
+    return _render(["Agent", "Track", "Runs", "Mean [95% CI]", "IQM [95% CI]", "Per run"], rows, fmt,
+                   f"Aggregate success % on `{split}` over runs (seeds) and tasks; intervals from a bootstrap "
+                   "over seeds and episodes")
+
+
+def compare_table(results: list[dict], split: str = "test", fmt: str = "md", interval: str = "ci") -> str:
+    """Every pair of agents on `split`, higher mean first: P(X > Y) and the score difference."""
+    groups = {key: by_split[split] for key, by_split in _group(results).items() if by_split.get(split)}
+    order = sorted(groups, key=lambda k: -aggregate(groups[k])["mean"])
+    rows = []
+    for i, x in enumerate(order):
+        for y in order[i + 1:]:
+            c = compare(groups[x], groups[y])
+            rows.append([f"{x[0]} vs {y[0]}", _pct(c["p_improvement"], c["p_improvement_ci"]),
+                         _pct(c["difference"], c["difference_ci"])])
+    return _render(["X vs Y", "P(X > Y) %", "Δ score"], rows, fmt,
+                   f"Pairwise comparisons on `{split}`: probability of improvement and score difference "
+                   "(paired bootstrap, 95% intervals)")
+
+
+def report(results: list[dict], table: str = "splits", split: str = "test", fmt: str = "md",
+           interval: str = "ci") -> str:
+    if interval not in INTERVALS:
+        raise ValueError(f"unknown interval {interval!r}")
     ablations = [r for r in results if r.get("analysis") == "dynamics_ablation"]
     if table == "ablation":
-        return ablation_table(ablations, fmt)
+        return ablation_table(ablations, fmt, interval)
     results = [r for r in results if r.get("analysis") != "dynamics_ablation"]
     if table in ("splits", "hard"):
-        return splits_table(results, fmt, hard=table == "hard")
+        return splits_table(results, fmt, hard=table == "hard", interval=interval)
     if split not in SPLITS:
         raise ValueError(f"unknown split {split!r}")
-    return {"tasks": tasks_table, "levels": levels_table, "errors": errors_table}[table](results, split, fmt)
+    tables = {"tasks": tasks_table, "levels": levels_table, "errors": errors_table, "aggregate": aggregate_table,
+              "compare": compare_table}
+    return tables[table](results, split, fmt, interval)

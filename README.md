@@ -51,34 +51,38 @@ python -m benchmark run --agent adaptive --all-hard --workers 8      # non-privi
 python -m benchmark.world_model evaluate                             # dynamics-prediction track
 ```
 
-Bench Score (success % averaged over the 9 tasks; `bc` = mean ± std over 3 seeds; single runs
-± bootstrap 95% CI half-width):
+Bench Score (success % averaged over the 9 tasks; `bc` = mean over 5 seeds; every score with
+its 95% bootstrap interval over seeds and episodes):
 
 | Agent | Track | test | test_layout | test_visual | test_dynamics | val |
 |---|---|---|---|---|---|---|
-| bc | state | 96.1 ± 4.0 | 63.9 ± 9.9 | 94.8 ± 5.8 | 84.8 ± 1.5 | 96.1 ± 5.1 |
-| random | state | 0.0 ± 0.0 | 0.0 ± 0.0 | 0.6 ± 0.8 | 0.0 ± 0.0 | 0.0 ± 0.0 |
-| oracle (privileged) | state | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 |
+| bc | state | 91.9 [84.3, 98.0] | 57.1 [45.3, 69.9] | 90.9 [83.6, 97.6] | 80.6 [74.2, 86.1] | 92.2 [84.7, 98.6] |
+| random | state | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] | 0.6 [0.0, 1.7] | 0.0 [0.0, 0.0] | 0.0 [0.0, 0.0] |
+| oracle (privileged) | state | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] | 100.0 [100.0, 100.0] |
 
 ![BC Bench Score per split and per level](docs/benchmark_results.png)
 
-Hard tier: realistic physics with hidden per-episode dynamics, as Bench Score (mean ± std over
-3 seeds):
+Hard tier: realistic physics with hidden per-episode dynamics, as Bench Score (mean over 5
+seeds for the learned agents, with the 95% bootstrap interval over seeds and episodes):
 
 | Agent | hard_test (in range) | hard_test_ood (beyond it) |
 |---|---|---|
-| bc-nominal (trained in nominal physics, zero-shot) | 86.9 ± 4.5 | 7.2 ± 0.5 |
-| bc | 62.0 ± 20.4 | 13.0 ± 1.9 |
-| bc-history | 29.6 ± 4.2 | 4.3 ± 0.9 |
-| bc-dagger | 69.3 ± 22.5 | 15.4 ± 0.9 |
-| bc-history-dagger | **98.5 ± 0.9** | **19.4 ± 2.8** |
+| bc-nominal (trained in nominal physics, zero-shot) | 84.4 [79.3, 89.1] | 7.4 [4.3, 10.8] |
+| bc | 66.3 [50.3, 81.9] | 13.0 [9.2, 17.0] |
+| bc-history (4-step history) | 29.6 [24.8, 34.3] | 3.6 [1.4, 6.0] |
+| bc-gru (recurrent) | 29.1 [24.7, 34.7] | 4.1 [0.8, 9.7] |
+| bc-dagger | 80.8 [59.6, 98.7] | 15.8 [11.2, 20.4] |
+| bc-history-dagger | 87.8 [66.0, 99.4] | 19.3 [14.4, 24.0] |
+| bc-gru-dagger | **98.8 [96.9, 99.9]** | **20.9 [16.2, 26.2]** |
 | fixed-expert (scripted, assumes nominal dynamics) | 88.3 | 1.7 |
 | adaptive-expert (scripted, identifies the dynamics online) | 100.0 | 99.4 |
 | oracle (privileged: reads the hidden parameters) | 100.0 | 100.0 |
 
-- **In range:** with DAgger and a short history of its own actions, imitation handles the
-  hidden dynamics.
-- **Beyond the training range:** every learned agent fails, mostly through control latency.
+- **In range:** with DAgger and a recurrent state, imitation handles the hidden dynamics on
+  every seed (96–100). The MLP variants with DAgger reach 97–99 on most seeds, but one or two
+  of five collapse to 44–64 (they never learn to type).
+- **Beyond the training range:** every learned agent fails, mostly through control latency. A
+  recurrent state does not extrapolate further than a 4-step history.
 - **Solvable without privileged access:** the oracle's control law on observations alone
   scores 99.4 beyond the range when it identifies latency and the cursor mapping online, and
   1.7 when it does not (`learning/adaptive.py`). The gap is closable, and closing it takes
@@ -106,8 +110,11 @@ agent are in **[BENCHMARK.md](BENCHMARK.md)**.
 | Hard tier: realistic physics with hidden per-episode dynamics (latency, acceleration, rotating mouse, sag, noise, per-key forces, auto-repeat, double-click) | ✅ `environment/dynamics.py`, `hard_*` splits |
 | Dynamics-prediction (world-model) track | ✅ `benchmark/world_model.py` |
 | DAgger baselines (privileged oracle → student) and single-factor dynamics ablation | ✅ `scripts/run_hard_dagger.sh`, `benchmark/ablation.py` |
+| Recurrent baseline (`bc-gru`, `bc-gru-dagger`) | ✅ `learning/recurrent.py` |
+| Statistics: 5 seeds, bootstrap intervals over seeds and episodes, IQM, probability of improvement | ✅ `benchmark/stats.py`, `report --table aggregate\|compare` |
+| Packaging: `pip install -e .`, `cxr-bench` command, Dockerfile, GPU runbook | ✅ `pyproject.toml`, [docs/GPU.md](docs/GPU.md); the Docker image has not been built or tested yet |
 | Non-privileged expert with online system identification (solvability of the hard tier from observations) | ✅ `learning/adaptive.py`, `scripts/run_adaptive.sh` |
-| Vision-track learned agent | ⏳ pipeline ready (`learning/vision.py`, `scripts/run_vision.sh`, `vision_subgoal` diagnostic track); a full training run needs a server GPU, so no result yet |
+| Vision-track learned agent | ⏳ pipeline ready (`learning/vision.py`, `scripts/run_vision.sh`, `vision_subgoal` diagnostic track); a full training run needs a server GPU, so no result yet: `sh scripts/run_gpu.sh` ([docs/GPU.md](docs/GPU.md)) |
 | Gymnasium API: registered envs, state/pixel observations, seeding, vector envs, render modes | ✅ `environment/gym_env.py` |
 | RL (PPO/SAC) | ⏳ Gymnasium env and shaped reward are ready; no RL trainer yet |
 
@@ -129,9 +136,14 @@ python main.py                             # milestone 1
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .                           # or: pip install -r requirements.txt
 python main.py                             # milestone 1 (offscreen rendering uses CGL)
 ```
+
+`pip install -e .` also installs the `cxr-bench` command (the same as `python -m benchmark`).
+The package must be installed in editable mode: the scene and assets load from the source
+tree. A `Dockerfile` (CUDA, EGL rendering) is included; [docs/GPU.md](docs/GPU.md) is the
+runbook for the GPU runs.
 
 MuJoCo physics runs on the CPU; PyTorch uses CUDA when available. No model downloads
 are needed: the robot and all devices are defined in `assets/`.
@@ -343,7 +355,10 @@ control/
 learning/
   scripted_policy.py   expert for every task
   dataset.py           features, demonstration collection and storage
-  policy.py            behaviour cloning (MLP + optional CNN encoders)
+  policy.py            behaviour cloning (MLP + optional CNN encoders, optional history)
+  recurrent.py         recurrent behaviour cloning (GRU over the episode, `bc-gru`)
+  adaptive.py          non-privileged expert with online identification of the dynamics
+  vision.py            behaviour cloning from pixels (vision track)
 evaluation/
   task_success.py      episode runner, task suites
   metrics.py           success rate, time, wrong keys, failed clicks, collisions
@@ -353,10 +368,15 @@ docs/                  demo.gif, right_click.gif, devices.png, dashboard.png, be
                        hard_results.png
 benchmark/             ComputerXRobot-Bench: suite (splits, episodes), tracks, agents, harness
                        (evaluation, demonstration / DAgger collection), metrics, report, plot,
-                       dynamics ablation, world-model track, example agent; `python -m benchmark`
-scripts/run_baselines.sh   reproduces the standard-split baseline results in BENCHMARK.md
-scripts/run_hard_baselines.sh  reproduces the hard-tier baseline results
+                       dynamics ablation, world-model track, statistics (bootstrap CIs, IQM,
+                       probability of improvement), example agent; `python -m benchmark`
+scripts/run_cpu.sh     every state-track result in BENCHMARK.md (runs the five scripts below)
+scripts/run_baselines.sh   standard-split baselines
+scripts/run_hard_baselines.sh  hard-tier baselines (bc, bc-history, bc-gru, bc-nominal)
 scripts/run_hard_dagger.sh     DAgger baselines; scripts/run_hard_ablation.sh: dynamics ablation
+scripts/run_adaptive.sh        non-privileged scripted experts
+scripts/run_gpu.sh     vision-track baseline on a CUDA GPU (scripts/run_vision.sh); see docs/GPU.md
+pyproject.toml, Dockerfile     `pip install -e .` (cxr-bench command); CUDA + EGL image
 BENCHMARK.md           benchmark card: protocol, tasks, splits, metrics, results
 main.py                CLI: demo (display / mp4 / gif / png), viewer, annotate, collect, train, evaluate
 ```

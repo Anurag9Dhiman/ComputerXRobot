@@ -6,6 +6,11 @@
 # so if a 9-hour session ends mid-run, commit the notebook, add its output
 # as an input dataset next session, copy it back into /kaggle/working, and
 # re-run — it continues where it stopped.
+#
+# CHECK CELL 1'S PROBE FIRST: it times one rendered episode. GPU/EGL ~ a few seconds;
+# if it reports 30s+, rendering is on the CPU and the run won't fit a session — fix EGL first.
+# First-pass settings that fit one GPU session (set before running cell 2/3):
+#   os.environ["PER_TASK"]="40"; os.environ["SEEDS"]="0"; os.environ["EPOCHS"]="30"
 
 # %% [cell 1] Setup: clone (public repo), install, headless rendering
 import os, subprocess, sys, pathlib
@@ -23,13 +28,25 @@ os.environ["MUJOCO_GL"] = "egl"
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-import torch
-print("CUDA:", torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else "-")
-# Smoke-test the renderer; if this throws, switch MUJOCO_GL to "osmesa" (run: apt-get install -y libosmesa6)
-r = subprocess.run([sys.executable, "-m", "benchmark", "run", "--agent", "random", "--tasks", "type_key",
-                    "--per-task", "1", "--track", "vision", "--split", "test", "--tag", "smoke",
-                    "--out-dir", "/kaggle/working/smoke"], capture_output=True, text=True)
-print(r.stdout[-500:], r.stderr[-800:])
+import time, torch
+assert torch.cuda.is_available(), "No GPU! Set Settings -> Accelerator -> GPU T4 x2, then re-run."
+print("CUDA:", torch.cuda.is_available(), "|", torch.cuda.get_device_name(0))
+
+# Which MuJoCo render backend actually engaged? egl = GPU (fast); osmesa/glfw = CPU (10-50x slower).
+import mujoco
+print("MUJOCO_GL =", os.environ.get("MUJOCO_GL"))
+
+# RENDER-SPEED PROBE: collect 1 vision episode and time it. This is the number that decides feasibility.
+# On a GPU with EGL this should be a few seconds. If it takes ~30s+, rendering is on the CPU (osmesa) and
+# the full run will NOT fit a session -- fix EGL before collecting (do not proceed).
+t0 = time.time()
+r = subprocess.run([sys.executable, "-m", "benchmark", "collect", "--split", "train", "--tasks", "type_key",
+                    "--per-task", "1", "--vision", "--seed", "999", "--out", "/kaggle/working/probe.npz"],
+                   capture_output=True, text=True)
+dt = time.time() - t0
+print(r.stdout[-400:], r.stderr[-600:])
+print(f"\n>>> PROBE: 1 vision episode took {dt:.1f}s")
+print(">>> GPU/EGL expected: a few seconds. If 30s+, it's CPU rendering -- STOP and fix EGL before cell 2.")
 
 # %% [cell 2] Collect oracle demonstrations (vision inputs). Resumable: skips existing .npz.
 import os, subprocess, sys

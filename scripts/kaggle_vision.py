@@ -107,3 +107,44 @@ subprocess.run([sys.executable, "-m", "benchmark.plot", *glob.glob("results/*.js
                 "--out", "/kaggle/working/vision_results.png"])
 # Download results/ and vision_results.png from the Kaggle output, commit them to the repo:
 #   git add results/vbc_s*_test*.json results/vbcsg_s*_test.json docs/vision_results.png
+
+# %% [cell 6] LIVE progress monitor. Run this in an INTERACTIVE session to watch the run.
+# It refreshes in place every REFRESH seconds for DURATION_MIN minutes, showing how many
+# demos/checkpoints/results exist and the tail of the newest log. Re-run it any time for a
+# one-off snapshot (set DURATION_MIN=0). (In a committed/headless run, output appears only
+# at the end, so this is for interactive viewing.)
+import os, time, glob
+from datetime import datetime
+try:
+    from IPython.display import clear_output
+except Exception:
+    clear_output = lambda wait=False: None
+
+TASKS = "type_key open_app close_window type_text clear_text open_file search open_result write_note".split()
+REFRESH = 20          # seconds between refreshes
+DURATION_MIN = 180    # how long to keep refreshing; set 0 for a single snapshot
+
+def snapshot():
+    npz = sorted(os.path.basename(f)[13:-4] for f in glob.glob("data/vision_train_*.npz"))
+    cks = sorted(os.path.basename(f) for f in glob.glob("checkpoints/*.pt"))
+    res = sorted(os.path.basename(f) for f in glob.glob("results/*.json"))
+    logs = glob.glob("data/*.log")
+    newest = max(logs, key=os.path.getmtime) if logs else None
+    print(f"[{datetime.now():%H:%M:%S}]  cwd={os.getcwd()}")
+    print(f"  demos      {len(npz)}/{len(TASKS)}  {npz}")
+    print(f"  checkpoints {len(cks)}  {cks}")
+    print(f"  results     {len(res)}  {res}")
+    if newest:
+        print(f"  newest log: {os.path.basename(newest)}")
+        try:
+            print("   " + "\n   ".join(open(newest).read().splitlines()[-3:]))
+        except Exception:
+            pass
+
+end = time.time() + DURATION_MIN * 60
+while True:
+    clear_output(wait=True)
+    snapshot()
+    if time.time() >= end:
+        break
+    time.sleep(REFRESH)
